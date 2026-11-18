@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Query, Request
+from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictInt, ValidationError
@@ -19,7 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
-from .evaluate_builds import BuildTargets, ImageDigest
+from .evaluate_builds import BuildIdentity, BuildTargets, ImageDigest
 from .investigator import enqueue_investigation, investigation_key
 from .store import approvals, database, deliveries, enqueue, investigations
 
@@ -113,6 +113,12 @@ class ApprovalDetail(ApprovalRequest):
     run_id: str
     actor: str
     created_at: datetime
+
+
+class PromotionDetail(BaseModel):
+    run_id: str
+    baseline: BuildIdentity
+    candidate: BuildIdentity
 
 
 class QueuedInvestigation(BaseModel):
@@ -430,6 +436,25 @@ def create_app():
                 raise ReadError(409, "decision_exists", "A different decision already exists for this run")
             return ApprovalDetail(**{**existing, "created_at": as_utc(existing["created_at"])})
         return record
+
+    @app.get("/v1/runs/{delivery_id}/promotion", dependencies=[Depends(require_approver)])
+    def read_promotion(delivery_id: str, response: Response) -> PromotionDetail:
+        run = load_run(delivery_id, deliveries.c.state, deliveries.c.commit_sha, deliveries.c.report, mode)
+        report = run["report"] or {}
+        if delivery_id.startswith("demo-") or run["evaluation_mode"] != "build_endpoints" or run["state"] != "completed":
+            raise ReadError(409, "run_not_eligible", "A completed build evaluation from a GitHub delivery is required")
+        if not is_current_candidate(run) or report["builds"].get("baseline") != targets.baseline.build.model_dump():
+            raise ReadError(409, "stale_candidate", "The evaluated build pair must match the configured build pair")
+        if report.get("verdict") != "pass":
+            raise ReadError(409, "gate_not_passed", "The release gate must pass before rollout")
+        with engine.connect() as connection:
+            approval = connection.execute(select(approvals.c.decision, approvals.c.image_digest).where(
+                approvals.c.run_id == delivery_id,
+            )).one_or_none()
+        if approval != ("approve", targets.candidate.build.image_digest):
+            raise ReadError(409, "approval_required", "A saved approval for the candidate digest is required")
+        response.headers["Cache-Control"] = "no-store"
+        return PromotionDetail(run_id=delivery_id, baseline=targets.baseline.build, candidate=targets.candidate.build)
 
     @app.post("/v1/runs/{delivery_id}/investigations", status_code=202, dependencies=[Depends(require_maintainer)])
     def start_investigation(delivery_id: str, body: InvestigationRequest) -> QueuedInvestigation:

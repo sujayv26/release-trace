@@ -3,15 +3,17 @@ import json
 import os
 import tempfile
 import unittest
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext, redirect_stdout
 from datetime import datetime, timedelta
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
 import httpx
 from fastapi.testclient import TestClient
+from staging import promote_approved
 
-from .api import create_app
+from .api import PromotionDetail, create_app
 from .evaluate_builds import FIXTURES, BuildTargets, evaluate_builds
 from .github_check import BUILD_CHECK_NAME, check_payload, completed_run
 from .investigator import process_investigation
@@ -99,6 +101,9 @@ class PipelineTest(unittest.TestCase):
                     rejected = client.post(endpoint, headers=approver, json={**approval, "decision": "reject"})
                     self.assertEqual(rejected.status_code, 200)
                     self.assertEqual(rejected.json()["decision"], "reject")
+                    blocked_promotion = client.get(f"{detail}/promotion", headers=approver)
+                    self.assertEqual((blocked_promotion.status_code, blocked_promotion.json()["code"]),
+                                     (409, "gate_not_passed"))
 
                     self.assertEqual(push(sha, "build-passing"), "queued")
                     endpoint = "/v1/runs/build-passing/approval"
@@ -107,6 +112,10 @@ class PipelineTest(unittest.TestCase):
                                side_effect=lambda *args: run_pinned(*args, fail_candidate=False)):
                         self.assertEqual(process_one(engine), "build-passing")
                     passing_run = "/v1/runs/build-passing"
+                    promotion_path = f"{passing_run}/promotion"
+                    self.assertEqual(client.get(promotion_path, headers=auth).status_code, 403)
+                    pending = client.get(promotion_path, headers=approver)
+                    self.assertEqual((pending.status_code, pending.json()["code"]), (409, "approval_required"))
                     self.assertTrue(client.get(passing_run, headers=approver).json()["can_record_decision"])
                     self.assertFalse(client.get(passing_run, headers=auth).json()["can_record_decision"])
                     saved = client.post(endpoint, headers=approver, json=approval)
@@ -116,6 +125,50 @@ class PipelineTest(unittest.TestCase):
                     self.assertEqual(reviewed["approval"], saved.json())
                     self.assertFalse(reviewed["can_record_decision"])
                     self.assertEqual(client.post(endpoint, headers=approver, json=approval).json(), saved.json())
+                    authorized = client.get(promotion_path, headers=approver)
+                    self.assertEqual(authorized.status_code, 200)
+                    self.assertEqual(authorized.headers["Cache-Control"], "no-store")
+                    promotion = PromotionDetail.model_validate(authorized.json())
+                    self.assertEqual((promotion.baseline, promotion.candidate), (pinned.baseline.build, pinned.candidate.build))
+                    container = {"name": "app", "image": f"registry.example/app@{promotion.baseline.image_digest}"}
+                    rollout = {
+                        "metadata": {"resourceVersion": "17"},
+                        "spec": {"strategy": {"canary": {}}, "template": {"spec": {"containers": [container]}}},
+                        "status": {"phase": "Healthy", "stableRS": "baseline", "currentPodHash": "baseline"},
+                    }
+                    image, changes = promote_approved.rollout_patch(rollout, "app", promotion)
+                    self.assertEqual(image, f"registry.example/app@{pinned.candidate.build.image_digest}")
+                    self.assertEqual(changes, [
+                        {"op": "test", "path": "/metadata/resourceVersion", "value": "17"},
+                        {"op": "replace", "path": "/spec/template/spec/containers/0/image", "value": image},
+                    ])
+                    argv = [
+                        "promote_approved", "build-passing", "--context", "kind-staging",
+                        "--namespace", "demo", "--rollout", "support", "--container", "app",
+                    ]
+                    command_output = StringIO()
+                    with (
+                        patch("staging.promote_approved.httpx.Client", side_effect=lambda **_: nullcontext(client)),
+                        patch("staging.promote_approved.subprocess.check_output", return_value=json.dumps(rollout)),
+                        patch("staging.promote_approved.subprocess.run") as apply_patch,
+                        patch("sys.argv", argv),
+                        redirect_stdout(command_output),
+                    ):
+                        promote_approved.main()
+                        apply_patch.assert_not_called()
+                        self.assertEqual(json.loads(command_output.getvalue())["state"], "preview")
+                        command_output.truncate(0)
+                        command_output.seek(0)
+                        argv.append("--apply")
+                        promote_approved.main()
+                        apply_patch.assert_called_once()
+                        self.assertEqual(json.loads(apply_patch.call_args.args[0][-1]), changes)
+                        self.assertEqual(json.loads(command_output.getvalue())["state"], "submitted")
+                    container["image"] = image
+                    self.assertEqual(promote_approved.rollout_patch(rollout, "app", promotion), (image, []))
+                    container["image"] = "registry.example/app@sha256:" + "0" * 64
+                    with self.assertRaisesRegex(ValueError, "does not match the evaluated baseline"):
+                        promote_approved.rollout_patch(rollout, "app", promotion)
                     conflict = client.post(endpoint, headers=approver, json={**approval, "decision": "reject"})
                     self.assertEqual((conflict.status_code, conflict.json()["code"]), (409, "decision_exists"))
 
@@ -127,6 +180,9 @@ class PipelineTest(unittest.TestCase):
                         with TestClient(create_app()) as restarted:
                             stale = restarted.post(endpoint, headers=approver, json=approval)
                             self.assertEqual((stale.status_code, stale.json()["code"]), (409, "stale_candidate"))
+                            stale_promotion = restarted.get(promotion_path, headers=approver)
+                            self.assertEqual((stale_promotion.status_code, stale_promotion.json()["code"]),
+                                             (409, "stale_candidate"))
 
     def test_signed_delivery_produces_one_scoped_report(self):
         with tempfile.TemporaryDirectory() as directory, ExitStack() as cleanup:

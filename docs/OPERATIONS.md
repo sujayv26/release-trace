@@ -232,6 +232,30 @@ to the same configuration before accepting approvals for a new candidate.
 Requests for a superseded candidate return HTTP 409. The endpoint records a
 decision in the database.
 
+## Submit an approved image to Argo Rollouts
+
+Run this workflow for a completed passing GitHub build evaluation with a saved
+approval. Use a staging kubeconfig with access to read and patch the named
+Rollout. Install the service requirements and set `RELEASETRACE_APPROVER_TOKEN`
+in the command's environment.
+
+```bash
+python -m staging.promote_approved DELIVERY_ID --api-url https://releasetrace.example.com --context staging --namespace app --rollout support --container app
+```
+
+The command previews the image reference. Add `--apply` to submit it. The
+Rollout must use a canary strategy and its named container must currently use
+the evaluated baseline digest in the same image repository. The API rejects
+stale build pairs, rejected or missing approvals, and seeded demo runs. The
+command uses a conditional patch with the Rollout's resource version and
+leaves the existing canary analysis and abort behavior to Argo. Run with the
+same arguments again to check whether the candidate is already configured.
+
+Keep candidate configuration consistent across serving API instances and
+coordinate target configuration changes with staging submissions.
+`submitted` means Kubernetes accepted the patch. Observe the Rollout and its
+AnalysisRuns to confirm the outcome.
+
 ## Run the staging canary drill
 
 The canary workflow creates a disposable kind cluster and runs Argo Rollouts
