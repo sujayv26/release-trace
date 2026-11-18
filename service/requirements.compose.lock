@@ -8,37 +8,93 @@ anyio==4.16.0
     # via
     #   fastapi
     #   httpx
+    #   httpx2
+    #   langsmith
     #   starlette
 certifi==2026.10.23
     # via
     #   httpcore
     #   httpx
+    #   langchain-core
+    #   requests
 cffi==2.1.1 ; platform_python_implementation != 'PyPy'
     # via cryptography
+charset-normalizer==3.5.2
+    # via requests
 click==8.5.1
     # via uvicorn
 cryptography==50.0.2
     # via pyjwt
+distro==1.9.0
+    # via langsmith
 fastapi==0.163.2
     # via -r service/requirements.txt
 h11==0.16.0
     # via
     #   httpcore
+    #   httpcore2
     #   uvicorn
 httpcore==1.0.9
     # via httpx
+httpcore2==2.16.2 ; sys_platform != 'emscripten'
+    # via httpx2
 httpx==0.28.1
-    # via -r service/requirements.txt
+    # via
+    #   -r service/requirements.txt
+    #   langchain-core
+    #   langgraph-sdk
+httpx2==2.16.2
+    # via langsmith
+httpx2-jsfetch==1.0 ; sys_platform == 'emscripten'
+    # via httpx2
 idna==3.20
     # via
     #   anyio
     #   httpx
+    #   httpx2
+    #   requests
+jsonpatch==1.47
+    # via langchain-core
+jsonpointer==3.12
+    # via jsonpatch
+langchain-core==1.8.2
+    # via
+    #   langgraph
+    #   langgraph-checkpoint
+    #   langgraph-prebuilt
+    #   langgraph-sdk
+langchain-protocol==0.0.21
+    # via
+    #   langchain-core
+    #   langgraph-sdk
+langgraph==1.2.22
+    # via -r service/requirements.txt
+langgraph-checkpoint==4.3.2
+    # via
+    #   langgraph
+    #   langgraph-prebuilt
+langgraph-prebuilt==1.1.2
+    # via langgraph
+langgraph-sdk==0.4.14
+    # via langgraph
+langsmith==0.15.0
+    # via langchain-core
 mako==1.4.3
     # via alembic
 markupsafe==3.0.4
     # via mako
 opentelemetry-api==1.45.2
     # via fastapi
+orjson==3.13.0
+    # via
+    #   langgraph-sdk
+    #   langsmith
+ormsgpack==1.13.1
+    # via langgraph-checkpoint
+packaging==26.3
+    # via
+    #   langchain-core
+    #   langsmith
 psycopg==3.3.9
     # via -r service/requirements.txt
 psycopg-binary==3.3.9 ; implementation_name != 'pypy'
@@ -46,22 +102,46 @@ psycopg-binary==3.3.9 ; implementation_name != 'pypy'
 pycparser==3.12 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
     # via cffi
 pydantic==2.14.3
-    # via fastapi
+    # via
+    #   fastapi
+    #   langchain-core
+    #   langgraph
+    #   langsmith
 pydantic-core==2.50.4
     # via pydantic
 pyjwt==2.15.1
     # via -r service/requirements.txt
+pyyaml==6.0.3
+    # via langchain-core
+requests==2.34.2
+    # via
+    #   langsmith
+    #   requests-toolbelt
+requests-toolbelt==1.0.0
+    # via langsmith
+sniffio==1.3.1
+    # via langsmith
 sqlalchemy==2.1.9
     # via
     #   -r service/requirements.txt
     #   alembic
 starlette==1.10.0
     # via fastapi
+tenacity==9.2.1
+    # via langchain-core
+truststore==0.10.5 ; sys_platform != 'emscripten'
+    # via
+    #   httpcore2
+    #   httpx2
 typing-extensions==4.16.0
     # via
     #   alembic
     #   anyio
     #   fastapi
+    #   httpx2
+    #   langchain-core
+    #   langchain-protocol
+    #   langsmith
     #   opentelemetry-api
     #   psycopg
     #   pydantic
@@ -75,5 +155,21 @@ typing-inspection==0.4.5
     #   pydantic
 tzdata==2026.6 ; sys_platform == 'win32'
     # via psycopg
+urllib3==2.8.0
+    # via requests
+uuid-utils==0.19.0
+    # via
+    #   langchain-core
+    #   langsmith
 uvicorn==0.54.0
     # via -r service/requirements.txt
+websockets==17.4
+    # via
+    #   langgraph-sdk
+    #   langsmith
+xxhash==4.1.0
+    # via
+    #   langgraph
+    #   langsmith
+zstandard==0.25.0
+    # via langsmith

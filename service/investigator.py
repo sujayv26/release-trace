@@ -3,13 +3,14 @@
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
-from demo.release_trace_demo import Config, digest, retrieval_experiment
+from demo.release_trace_demo import Config, digest
 
+from .investigation_graph import MAX_EXPERIMENTS, RESTORE_RETRIEVAL, InvestigationContext, run_graph, scripted_planner
 from .store import deliveries, investigations
 
 
 def investigation_key(run_id, case_id):
-    return digest([run_id, case_id, "restore_retrieval"])
+    return digest([run_id, case_id, RESTORE_RETRIEVAL])
 
 
 def enqueue_investigation(engine, run_id, case_id):
@@ -27,29 +28,18 @@ def enqueue_investigation(engine, run_id, case_id):
     return investigation_id
 
 
-def investigate(inputs, report, case_id):
+def investigate(inputs, report, case_id, *, planner=scripted_planner, experiment_budget=MAX_EXPERIMENTS):
     fixture = inputs["fixture"]
     case = next(item for item in [fixture, *inputs["suite"]["cases"]] if item["case_id"] == case_id)
     baseline = report["baseline"]["results"][case_id]
     candidate = report["candidate"]["results"][case_id]
     stable_config, candidate_config = (Config(**fixture[name]) for name in ("baseline", "candidate"))
     result = {
-        "outcome": "inconclusive", "reason": "retrieval_settings_match", "experiment": None,
+        "outcome": "inconclusive", "experiment": None,
         "required_citation": case["required_citation"], "baseline": baseline, "candidate": candidate,
         "dataset_digest": report["dataset_digest"], "policy_digest": report["policy_digest"],
     }
-    if stable_config.retrieval == candidate_config.retrieval:
-        return result
-    experiment = retrieval_experiment(case, stable_config, candidate_config, {})
-    result["experiment"] = experiment
-    result["changed_parameter"] = {
-        "name": "retrieval", "before": candidate_config.retrieval, "after": stable_config.retrieval,
-    }
-    if baseline["outcome"] == "pass" and experiment["outcome"] == "pass":
-        result.update(outcome="supported", reason="restored_expected_citation")
-    else:
-        result.update(reason="rerun_did_not_establish_cause")
-    return result
+    return run_graph(result, InvestigationContext(case, stable_config, candidate_config, planner, experiment_budget))
 
 
 def process_investigation(engine):

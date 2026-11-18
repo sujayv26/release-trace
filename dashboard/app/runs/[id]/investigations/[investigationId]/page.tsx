@@ -7,6 +7,10 @@ const findings: Record<string, string> = {
   restored_expected_citation: 'Restoring the stable retrieval setting brought back the expected citation.',
   retrieval_settings_match: 'Both versions already use the same retrieval setting.',
   rerun_did_not_establish_cause: 'The rerun did not establish that retrieval caused the failure.',
+  experiment_budget_exhausted: 'The investigation reached its experiment limit.',
+  planner_timeout: 'The investigation planner timed out.',
+  planner_abstained: 'The planner found no suitable experiment.',
+  unsupported_intervention: 'The proposed experiment is unavailable for this investigation.',
 };
 
 export default async function InvestigationPage({ params }: {

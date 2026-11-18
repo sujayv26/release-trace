@@ -241,3 +241,7 @@ The worker executes the rerun. Read it with the viewer or maintainer token at
 shows the stable and candidate evidence, the retrieval change, and its result.
 An investigation can support a diagnosis or return inconclusive. The release
 verdict is recorded separately.
+
+The worker runs this workflow with LangGraph and a scripted local planner. It
+can execute one approved retrieval rerun per investigation. This demo requires
+no model credentials.

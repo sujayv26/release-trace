@@ -13,7 +13,7 @@ ReleaseTrace is the platform. **Investigator** is the feature reviewers use to e
 
 Complete a synthetic release run, sign in to the dashboard with the project maintainer token, and open the failed account-closure case. Select **Investigate**. The worker restores the stable retrieval setting for that case while preserving the candidate prompt. The saved report compares the stable response, candidate response, and rerun. A viewer can open the report after it has been requested. The release gate retains its original verdict.
 
-The current implementation uses one deterministic retrieval intervention. It can return **supported** or **inconclusive**. LangGraph, model selection, staging experiments, and the held-out benchmark are planned work.
+LangGraph runs the local investigation with a scripted planner and a budget of one retrieval experiment. It returns **supported** or **inconclusive** and saves the reason. Hosted model selection, additional interventions, staging experiments, and the held-out benchmark are planned work.
 
 ### Planned connected workflow
 
@@ -33,7 +33,8 @@ Use Python, FastAPI, Pydantic, SQLAlchemy, Alembic, and the existing `unittest` 
 | Module | Responsibility |
 |---|---|
 | [`service/api.py`](../service/api.py) | Typed requests, project access, and investigation reports |
-| [`service/investigator.py`](../service/investigator.py) | Investigation queue, retrieval rerun, and diagnosis |
+| [`service/investigator.py`](../service/investigator.py) | Investigation queue and inputs from the saved evaluation |
+| [`service/investigation_graph.py`](../service/investigation_graph.py) | Scripted planner, experiment limits, retrieval rerun, and diagnosis |
 | [`demo/release_trace_demo.py`](../demo/release_trace_demo.py) | Shared citation scorer and controlled experiment |
 | [`service/worker.py`](../service/worker.py) | Background execution and report persistence |
 | [`dashboard/app/runs/`](../dashboard/app/runs/) | Open the failed case and compare investigation evidence |
@@ -93,12 +94,12 @@ When candidate behavior is stochastic, record repeats for both candidate and int
 |---|---|---|
 | 1. Reproduce a failure | Complete. The fixture scorer and retrieval swap run locally. | One intervention restores the expected citation. The rerun changes only retrieval. |
 | 2. Connect the controlled rerun | Complete for synthetic runs. Queue requests, persist results, and compare them in the dashboard. | Maintainer requests deduplicate. Viewers can read the saved report. The original gate remains intact. |
-| 3. Build the graph | Implement tools, transitions, typed report validation, and a scripted adapter. | The agent selects a useful intervention, handles ambiguity, and stops at its budget. |
+| 3. Build the graph | The local graph selects a retrieval rerun or stops. Expand the tool set after adding fixtures for prompt and tool changes. | The scripted planner handles supported and inconclusive cases. The graph rejects unavailable interventions and stops at its budget. |
 | 4. Measure it | Add the hosted model adapter and compare all three methods on held-out cases. | The report includes actual results, costs where measurable, denominators, and error analysis. |
 | 5. Finish the flagship demo | Connect deployment-backed investigation and exercise staged rollout. | A reviewer can trace a failed check to a diagnosis and inspect a recorded canary abort drill. |
 
 ## 7. Next implementation step
 
 ```text
-Use the saved synthetic run and controlled retrieval experiment as the first LangGraph tools. Add a scripted local model adapter and enforce tool and step budgets. Test a supported diagnosis, an inconclusive case, and budget exhaustion. Preserve the existing investigation API and independent release verdict.
+Add versioned fixtures for prompt and tool-response changes. Expand the tested experiment allowlist and prepare a held-out split. Preserve the existing investigation API and independent release verdict.
 ```
