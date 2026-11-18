@@ -44,13 +44,17 @@ jobs:
       - name: Build and register evaluation images
         run: |
           docker build -t releasetrace-service:local -f service/Dockerfile .
+          registry_ip="$(docker inspect --format '{{(index .NetworkSettings.Networks "kind").IPAddress}}' kind-registry)"
           for variant in baseline candidate; do
             tag="localhost:5001/support:$variant"
             docker build --provenance=false --build-arg "VARIANT=$variant" -t "$tag" -f staging/BuildTarget.Dockerfile .
             docker push "$tag"
             ref="$(docker image inspect --format '{{index .RepoDigests 0}}' "$tag")"
             for node in $(kind get nodes --name releasetrace); do
-              docker exec "$node" crictl pull "$ref"
+              source="$registry_ip:5000/support@${ref#*@}"
+              docker exec "$node" ctr --namespace k8s.io images pull --plain-http "$source"
+              docker exec "$node" ctr --namespace k8s.io images tag "$source" "$ref"
+              docker exec "$node" crictl inspecti "$ref" >/dev/null
             done
             printf 'RELEASETRACE_%s_IMAGE=%s\n' "${variant^^}" "$ref" >> "$GITHUB_ENV"
           done

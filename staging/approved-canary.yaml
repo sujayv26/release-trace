@@ -102,6 +102,7 @@ spec:
       containers:
         - name: support
           image: BASELINE_IMAGE
+          imagePullPolicy: Never
           ports:
             - containerPort: 8100
           readinessProbe:
