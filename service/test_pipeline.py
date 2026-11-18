@@ -104,7 +104,10 @@ class PipelineTest(unittest.TestCase):
                     self.assertEqual(client.get(alpha, headers=unassigned).status_code, 404)
                     report = client.post(f"{alpha}/investigations", headers=alice, json={"case_id": "account-closure"})
                     self.assertEqual(report.status_code, 202)
-                    investigation_path = f"{alpha}/investigations/{report.json()['investigation_id']}"
+                    investigation_id = report.json()["investigation_id"]
+                    self.assertEqual(process_investigation(engine), investigation_id)
+                    investigation_path = f"{alpha}/investigations/{investigation_id}"
+                    self.assertEqual(client.get(investigation_path, headers=alice).json()["state"], "completed")
                     for path in ("/v1/projects/51/runs", alpha, f"{alpha}/cases", investigation_path):
                         self.assertEqual(client.get(path, headers=bob).status_code, 404)
                     for path in ("/v1/projects/52/runs", beta, f"{beta}/cases", f"{beta}/promotion"):
