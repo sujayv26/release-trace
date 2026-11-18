@@ -15,6 +15,18 @@ Complete a synthetic release run, sign in to the dashboard with the project main
 
 LangGraph runs the local investigation with a scripted planner and a budget of one experiment. The allowlist covers retrieval, prompt, and recorded tool response. The planner abstains when several settings differ. The held-out benchmark can also run with a hosted model. Staging experiments remain planned.
 
+```mermaid
+flowchart TB
+    accTitle: Current Investigator workflow
+    accDescr: The planner uses saved fixture evidence to select an eligible setting. One controlled experiment can support a diagnosis. Otherwise the result is inconclusive.
+    Evidence["Load saved fixture evidence"] --> Planner{"One eligible changed setting?"}
+    Planner -->|Yes| Rerun["Restore that setting and rerun"]
+    Planner -->|No| Abstain["Save an inconclusive result"]
+    Rerun --> Score{"Stable and rerun both pass?"}
+    Score -->|Yes| Supported["Save a supported diagnosis"]
+    Score -->|No| Abstain
+```
+
 ### Planned connected workflow
 
 1. A developer opens the failing case from a GitHub check. Both stable and candidate runs have completed on the same versioned case.

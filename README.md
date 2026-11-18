@@ -2,12 +2,24 @@
 
 ReleaseTrace helps teams review AI application releases. It runs the same policy cases against stable and candidate builds, blocks critical regressions, and gives reviewers evidence to investigate failures and approve the exact build they evaluated.
 
-| Workflow | What you can see |
-|---|---|
-| **Evaluate** | Stable and candidate scores, citations, and build provenance. One critical failure blocks a candidate even when it meets the aggregate threshold. |
-| **Investigate** | A controlled rerun changes one setting and shows whether the expected citation returns. The original gate decision stays recorded. |
-| **Approve** | An authorized reviewer records a decision for the candidate image digest. Stale candidates and mismatched digests are rejected. |
-| **Observe a rollout** | An isolated Argo Rollouts drill shows a healthy promotion and an unhealthy canary abort. |
+```mermaid
+flowchart TB
+    accTitle: ReleaseTrace review workflow
+    accDescr: A signed push triggers evaluation. The demo investigates a blocked candidate and approves a separate corrected candidate that passes.
+    Push["Signed GitHub push"] --> Evaluate["Evaluate stable and candidate"]
+    Evaluate --> Gate{"Release gate"}
+    Gate -->|Critical failure| Block["Blocked release"]
+    Gate -->|Passing corrected build| Review["Approver reviews the digest"]
+    Block --> Rerun["Run a controlled experiment"]
+    Review --> Decision["Save a digest-bound decision"]
+```
+
+<details>
+<summary>Why does the first release stay blocked after the rerun succeeds?</summary>
+
+The rerun restores the stable retrieval setting for one case and explains the regression. The original evaluation still records the failed critical case. The corrected build gets its own evaluation and decision.
+
+</details>
 
 ## Run the local demo
 
@@ -56,6 +68,8 @@ Stop the base stack with `docker compose down`. If you enabled approvals, use `d
 - **Investigator holdout.** Both offline methods diagnosed three of four diagnosable cases. The rule made one incorrect diagnosis across six cases. The scripted Investigator made zero and used four controlled reruns. [Benchmark and error analysis](docs/ReleaseTrace-Agent-Build-Guide.md#5-benchmark-the-contribution)
 
 The approval walkthrough uses synthetic build identities. The canary drill runs separately in kind. Connecting saved approvals to deployment of the exact OCI image, verifying live GitHub App delivery, and measuring hosted model results are open milestones.
+
+See the [system design and delivery lifecycle](docs/ARCHITECTURE.md) for the service boundaries, or expand the [canary decision flow](docs/OPERATIONS.md#run-the-staging-canary-drill) to see what the drill checks.
 
 ## Run without Docker
 

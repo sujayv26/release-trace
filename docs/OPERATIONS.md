@@ -242,6 +242,24 @@ the healthy revision. The GitHub Actions workflow uploads
 `rollout-evidence.json` with ReplicaSet hashes, AnalysisRun names, and measured
 time to detection and to the stable service probe.
 
+<details>
+<summary>Explore both canary outcomes</summary>
+
+```mermaid
+flowchart TB
+    accTitle: Canary promotion and abort
+    accDescr: Argo checks the exact canary revision. The drill observes a successful promotion and a separate abort after an HTTP 503.
+    Canary["Start a canary revision"] --> Probe{"Probe the expected ReplicaSet"}
+    Probe -->|Healthy response| Promote["Promote the revision"]
+    Probe -->|HTTP 503| Abort["Abort the canary"]
+    Promote --> New["Verify the stable Service serves the promoted revision"]
+    Abort --> Prior["Verify the stable Service still serves the healthy revision"]
+    New --> Evidence["Record rollout evidence"]
+    Prior --> Evidence
+```
+
+</details>
+
 For a local drill, install Argo Rollouts in a test cluster and create a fresh
 namespace. Run `python staging/run_drill.py --context YOUR_TEST_CONTEXT --namespace YOUR_DRILL_NAMESPACE`.
 The drill uses synthetic revisions. Deployments driven by saved ReleaseTrace
