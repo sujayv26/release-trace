@@ -1,4 +1,4 @@
-"""Accept signed GitHub pushes for one configured project."""
+"""Evaluate signed GitHub pushes and serve project-scoped release evidence."""
 
 import hmac
 import json
@@ -6,6 +6,7 @@ import logging
 import os
 import re
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Literal
@@ -15,13 +16,15 @@ from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictInt, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
-from .evaluate_builds import BuildIdentity, BuildTargets, ImageDigest
+from .accounts import ACCESS_KEY, bind_project_owners, key_hash
+from .evaluate_builds import BuildIdentity, ImageDigest
 from .investigator import enqueue_investigation, investigation_key
-from .store import approvals, database, deliveries, deployments, enqueue, investigations
+from .projects import Role, load_projects
+from .store import accounts, approvals, database, deliveries, deployments, enqueue, investigations, project_memberships
 
 MAX_BODY = 1024 * 1024
 DELIVERY_ID = re.compile(r"[A-Za-z0-9-]{1,128}")
@@ -67,6 +70,24 @@ class RunSummary(BaseModel):
 class RunPage(BaseModel):
     items: list[RunSummary]
     next_cursor: str | None
+
+
+class ProjectSummary(BaseModel):
+    id: str
+    name: str
+    organization: str
+    role: Role
+
+
+class AccountSummary(BaseModel):
+    handle: str | None
+    projects: list[ProjectSummary]
+
+
+@dataclass(frozen=True)
+class Principal:
+    handle: str | None
+    roles: dict[int, Role]
 
 
 class PolicyEvidence(BaseModel):
@@ -187,38 +208,39 @@ def as_utc(value: datetime | None) -> datetime | None:
 
 def create_app():
     secret = os.environ["RELEASETRACE_WEBHOOK_SECRET"].encode()
-    token = os.environ["RELEASETRACE_READ_TOKEN"].encode()
-    maintainer_token = os.getenv("RELEASETRACE_MAINTAINER_TOKEN", "").encode()
-    approver_token = os.getenv("RELEASETRACE_APPROVER_TOKEN", "").encode()
+    projects, managed = load_projects()
     approver_actor = os.getenv("RELEASETRACE_APPROVER_ACTOR", "").strip()
-    repository = int(os.environ["RELEASETRACE_REPOSITORY_ID"])
-    installation = int(os.environ["RELEASETRACE_INSTALLATION_ID"])
-    if not secret or not token or repository <= 0 or installation <= 0:
-        raise ValueError("Webhook secret, read token and positive GitHub IDs are required")
-    if maintainer_token and hmac.compare_digest(token, maintainer_token):
-        raise ValueError("Use distinct viewer and maintainer tokens")
-    if approver_token and (
-        not 1 <= len(approver_actor) <= 128 or
-        any(hmac.compare_digest(approver_token, role_token) for role_token in (token, maintainer_token))
-    ):
-        raise ValueError("An approver requires an actor name and a distinct token")
-    engine = database()
+    if not secret:
+        raise ValueError("A webhook secret is required")
+    local_tokens = {}
+    if not managed:
+        local_tokens = {
+            role: value.encode() for role, value in (
+                ("viewer", os.environ["RELEASETRACE_READ_TOKEN"]),
+                ("maintainer", os.getenv("RELEASETRACE_MAINTAINER_TOKEN", "")),
+                ("approver", os.getenv("RELEASETRACE_APPROVER_TOKEN", "")),
+            ) if value
+        }
+        if "viewer" not in local_tokens or len(set(local_tokens.values())) != len(local_tokens):
+            raise ValueError("A viewer token and distinct role tokens are required")
+        if "approver" in local_tokens and not 1 <= len(approver_actor) <= 128:
+            raise ValueError("An approver requires an actor name")
     demo = Path(__file__).resolve().parents[1] / "demo"
-    inputs = {
+    standard_inputs = {
         "fixture": json.loads((demo / "fixture.json").read_text(encoding="utf-8")),
         "suite": json.loads((demo / "gate_suite.json").read_text(encoding="utf-8")),
     }
-    targets_path = os.getenv("RELEASETRACE_BUILD_TARGETS_FILE")
-    if not targets_path and os.getenv("RELEASETRACE_EXTENDED_FIXTURES") == "1":
+    fixture_inputs = standard_inputs
+    if os.getenv("RELEASETRACE_EXTENDED_FIXTURES") == "1":
         extra = json.loads((demo / "investigation_cases.json").read_text(encoding="utf-8"))
-        inputs["suite"]["cases"].extend(extra)
-    targets = None
-    if targets_path:
-        try:
-            targets = BuildTargets.model_validate_json(Path(targets_path).read_bytes())
-        except (OSError, ValidationError):
-            raise ValueError("Invalid configured build target file") from None
-        inputs.update(evaluation_mode="build_endpoints", build_targets=targets.model_dump(mode="json"))
+        suite = standard_inputs["suite"]
+        fixture_inputs = {**standard_inputs, "suite": {**suite, "cases": [*suite["cases"], *extra]}}
+    engine = database()
+    try:
+        bind_project_owners(engine, projects, managed=managed)
+    except Exception:
+        engine.dispose()
+        raise
 
     @asynccontextmanager
     async def lifespan(app):
@@ -228,53 +250,51 @@ def create_app():
             engine.dispose()
 
     app = FastAPI(lifespan=lifespan)
-    scope = (
-        deliveries.c.repository_id == repository,
-        deliveries.c.installation_id == installation,
-    )
     mode = func.coalesce(deliveries.c.inputs["evaluation_mode"].as_string(), "synthetic_fixture").label("evaluation_mode")
+    project_columns = tuple_(deliveries.c.repository_id, deliveries.c.installation_id)
 
-    def is_maintainer(request: Request):
-        if not maintainer_token:
-            return False
-        provided = request.headers.get("authorization", "").encode()
-        return hmac.compare_digest(provided, b"Bearer " + maintainer_token)
+    def authenticate(request: Request):
+        provided = request.headers.get("authorization", "")
+        if managed:
+            key = provided.removeprefix("Bearer ")
+            if provided.startswith("Bearer ") and ACCESS_KEY.fullmatch(key):
+                with engine.connect() as connection:
+                    rows = connection.execute(select(
+                        accounts.c.handle, project_memberships.c.repository_id, project_memberships.c.installation_id,
+                        project_memberships.c.organization, project_memberships.c.role,
+                    ).outerjoin(project_memberships).where(accounts.c.key_hash == key_hash(key))).all()
+                if rows:
+                    roles = {}
+                    for row in rows:
+                        project = projects.get(row.repository_id)
+                        if project and (project.installation_id, project.organization) == (row.installation_id, row.organization):
+                            roles[row.repository_id] = row.role
+                    return Principal(rows[0].handle, roles)
+        else:
+            for role, value in local_tokens.items():
+                if hmac.compare_digest(provided.encode(), b"Bearer " + value):
+                    return Principal(None, {next(iter(projects)): role})
+        raise ReadError(401, "unauthorized", "A valid access key is required")
 
-    def require_read(request: Request):
-        if is_maintainer(request) or is_approver(request):
-            return
-        provided = request.headers.get("authorization", "").encode()
-        if not hmac.compare_digest(provided, b"Bearer " + token):
-            raise ReadError(401, "unauthorized", "A project read token is required")
+    def allowed_projects(principal):
+        return project_columns.in_([(key, projects[key].installation_id) for key in principal.roles])
 
-    def require_maintainer(request: Request):
-        require_read(request)
-        if not is_maintainer(request):
-            raise ReadError(403, "maintainer_required", "A project maintainer token is required")
-
-    def is_approver(request: Request):
-        provided = request.headers.get("authorization", "").encode()
-        return bool(approver_token) and hmac.compare_digest(provided, b"Bearer " + approver_token)
-
-    def require_approver(request: Request):
-        require_read(request)
-        if not is_approver(request):
-            raise ReadError(403, "approver_required", "A project approver token is required")
-
-    def is_current_candidate(run):
+    def is_current_candidate(run, targets):
         report = run["report"] or {}
         return targets is not None and (
             run["commit_sha"] == targets.candidate.build.commit_sha
             and report.get("builds", {}).get("candidate") == targets.candidate.build.model_dump()
         )
 
-    def load_run(delivery_id, *columns):
+    def load_run(principal, delivery_id, *columns, role=None):
         with engine.connect() as connection:
-            result = connection.execute(select(*columns).where(
-                *scope, deliveries.c.id == delivery_id,
+            result = connection.execute(select(deliveries.c.repository_id, *columns).where(
+                allowed_projects(principal), deliveries.c.id == delivery_id,
             )).mappings().one_or_none()
         if result is None:
             raise ReadError(404, "run_missing", "Run was not found")
+        if role and principal.roles[result["repository_id"]] != role:
+            raise ReadError(403, f"{role}_required", f"A project {role} credential is required")
         return result
 
     @app.exception_handler(ReadError)
@@ -302,6 +322,8 @@ def create_app():
             connection.execute(select(investigations.c.id).limit(1))
             connection.execute(select(approvals.c.run_id).limit(1))
             connection.execute(select(deployments.c.run_id).limit(1))
+            connection.execute(select(accounts.c.handle).limit(1))
+            connection.execute(select(project_memberships.c.handle).limit(1))
         return {"status": "ready"}
 
     @app.post("/webhooks/github", response_model=Accepted, status_code=202)
@@ -324,24 +346,41 @@ def create_app():
             push = Push.model_validate_json(body)
         except ValidationError:
             return error(400, "invalid_push", "Invalid GitHub push payload", request_id)
-        if (push.repository.id, push.installation.id) != (repository, installation):
+        project = projects.get(push.repository.id)
+        if project is None or push.installation.id != project.installation_id:
             return error(403, "project_mismatch", "Webhook is outside the configured project", request_id)
         if push.deleted or not push.ref.startswith("refs/heads/"):
             return Accepted(status="ignored", delivery_id=delivery_id)
         if not COMMIT_SHA.fullmatch(push.after) or push.after == "0" * 40:
             return error(400, "invalid_commit", "Invalid GitHub commit SHA", request_id)
+        targets = project.targets
         if targets is not None and push.after != targets.candidate.build.commit_sha:
             return Accepted(status="ignored", delivery_id=delivery_id)
+        inputs = fixture_inputs if targets is None else {
+            **standard_inputs, "evaluation_mode": "build_endpoints", "build_targets": targets.model_dump(mode="json"),
+            **({"project_scoped_tokens": True} if managed else {}),
+        }
         status = await run_in_threadpool(
-            enqueue, engine, delivery_id, repository, installation, push.after, inputs,
+            enqueue, engine, delivery_id, project.repository_id, project.installation_id, push.after, inputs,
         )
         if status == "conflict":
             return error(409, "delivery_conflict", "Delivery ID already exists", request_id)
         return Accepted(status=status, delivery_id=delivery_id)
 
-    @app.get("/v1/projects/{project_id}/runs", dependencies=[Depends(require_read)])
-    def run_history(project_id: int, limit: PageSize = 25, after: Cursor = None) -> RunPage:
-        if project_id != repository:
+    @app.get("/v1/me")
+    def account(response: Response, principal: Principal = Depends(authenticate)) -> AccountSummary:
+        response.headers["Cache-Control"] = "no-store"
+        return AccountSummary(handle=principal.handle, projects=[
+            ProjectSummary(id=str(key), name=project.name, organization=project.organization, role=principal.roles[key])
+            for key, project in projects.items() if key in principal.roles
+        ])
+
+    @app.get("/v1/projects/{project_id}/runs")
+    def run_history(
+        project_id: int, limit: PageSize = 25, after: Cursor = None,
+        principal: Principal = Depends(authenticate),
+    ) -> RunPage:
+        if project_id not in principal.roles:
             raise ReadError(404, "project_missing", "Project was not found")
         candidate_verdict = deliveries.c.report["candidate"]["verdict"].as_string()
         query = select(
@@ -350,7 +389,7 @@ def create_app():
             candidate_verdict.label("candidate_verdict"),
             func.coalesce(deliveries.c.report["verdict"].as_string(), candidate_verdict).label("verdict"),
             mode,
-        ).where(*scope)
+        ).where(project_columns == (project_id, projects[project_id].installation_id))
         if after is not None:
             if not DELIVERY_ID.fullmatch(after):
                 raise ReadError(400, "invalid_cursor", "Invalid run cursor")
@@ -360,13 +399,15 @@ def create_app():
         items = [RunSummary(**{**row, "created_at": as_utc(row["created_at"])}) for row in rows[:limit]]
         return RunPage(items=items, next_cursor=items[-1].id if len(rows) > limit else None)
 
-    @app.get("/v1/runs/{delivery_id}", dependencies=[Depends(require_read)])
-    def run_detail(delivery_id: str, request: Request):
+    @app.get("/v1/runs/{delivery_id}")
+    def run_detail(delivery_id: str, principal: Principal = Depends(authenticate)):
         result = load_run(
-            delivery_id, deliveries.c.id, deliveries.c.commit_sha, deliveries.c.state, deliveries.c.report,
+            principal, delivery_id, deliveries.c.id, deliveries.c.commit_sha, deliveries.c.state, deliveries.c.report,
             deliveries.c.created_at, deliveries.c.completed_at, deliveries.c.github_check_id,
             deliveries.c.github_check_retry_at, mode,
         )
+        project = projects[result["repository_id"]]
+        role = principal.roles[project.repository_id]
         approval = None
         deployment = None
         if result["evaluation_mode"] == "build_endpoints":
@@ -382,27 +423,29 @@ def create_app():
                         deployments.c.generation.desc(), deployments.c.outcome,
                     ).limit(1)).mappings().one_or_none()
         return {
-            **result,
+            **{key: value for key, value in result.items() if key != "repository_id"},
+            "project_id": str(project.repository_id),
             "created_at": as_utc(result["created_at"]),
             "completed_at": as_utc(result["completed_at"]),
             "github_check_retry_at": as_utc(result["github_check_retry_at"]),
-            "can_investigate": is_maintainer(request) and result["evaluation_mode"] == "synthetic_fixture"
+            "can_investigate": role == "maintainer" and result["evaluation_mode"] == "synthetic_fixture"
             and result["state"] == "completed",
             "approval": ApprovalDetail(**{**approval, "created_at": as_utc(approval["created_at"])}) if approval else None,
             "deployment": DeploymentDetail(
                 **{**deployment, "recorded_at": as_utc(deployment["recorded_at"])}
             ) if deployment else None,
-            "can_record_decision": is_approver(request) and approval is None
+            "can_record_decision": role == "approver" and approval is None
             and result["evaluation_mode"] == "build_endpoints" and result["state"] == "completed"
-            and is_current_candidate(result),
+            and is_current_candidate(result, project.targets),
         }
 
-    @app.get("/v1/runs/{delivery_id}/cases", dependencies=[Depends(require_read)])
+    @app.get("/v1/runs/{delivery_id}/cases")
     def run_cases(
         delivery_id: str, limit: PageSize = 25, after: Cursor = None,
         outcome: Annotated[Outcome | None, Query()] = None,
+        principal: Principal = Depends(authenticate),
     ) -> CasePage:
-        run = load_run(delivery_id, deliveries.c.state, deliveries.c.inputs, deliveries.c.report)
+        run = load_run(principal, delivery_id, deliveries.c.state, deliveries.c.inputs, deliveries.c.report)
         report = run["report"]
         if report is None:
             return CasePage(state=run["state"], items=[], next_cursor=None)
@@ -435,19 +478,24 @@ def create_app():
                     ids[investigation_id].investigation_id = investigation_id
         return CasePage(state=run["state"], items=items, next_cursor=next_cursor)
 
-    @app.post("/v1/runs/{delivery_id}/approval", dependencies=[Depends(require_approver)])
-    def record_approval(delivery_id: str, body: ApprovalRequest) -> ApprovalDetail:
-        run = load_run(delivery_id, deliveries.c.state, deliveries.c.commit_sha, deliveries.c.report, mode)
+    @app.post("/v1/runs/{delivery_id}/approval")
+    def record_approval(
+        delivery_id: str, body: ApprovalRequest, principal: Principal = Depends(authenticate),
+    ) -> ApprovalDetail:
+        run = load_run(principal, delivery_id, deliveries.c.state, deliveries.c.commit_sha, deliveries.c.report,
+                       mode, role="approver")
+        targets = projects[run["repository_id"]].targets
         report = run["report"] or {}
         if run["evaluation_mode"] != "build_endpoints" or run["state"] != "completed":
             raise ReadError(409, "run_not_eligible", "A completed build evaluation is required")
-        if not is_current_candidate(run) or body.image_digest != targets.candidate.build.image_digest:
+        if not is_current_candidate(run, targets) or body.image_digest != targets.candidate.build.image_digest:
             raise ReadError(409, "stale_candidate", "The run and requested digest must match the configured candidate")
         if body.decision == "approve" and report.get("verdict") != "pass":
             raise ReadError(409, "gate_not_passed", "The release gate must pass before approval")
 
         record = ApprovalDetail(
-            **body.model_dump(), run_id=delivery_id, actor=approver_actor, created_at=datetime.now(timezone.utc),
+            **body.model_dump(), run_id=delivery_id, actor=principal.handle or approver_actor,
+            created_at=datetime.now(timezone.utc),
         )
         try:
             with engine.begin() as connection:
@@ -464,13 +512,17 @@ def create_app():
             return ApprovalDetail(**{**existing, "created_at": as_utc(existing["created_at"])})
         return record
 
-    @app.get("/v1/runs/{delivery_id}/promotion", dependencies=[Depends(require_approver)])
-    def read_promotion(delivery_id: str, response: Response) -> PromotionDetail:
-        run = load_run(delivery_id, deliveries.c.state, deliveries.c.commit_sha, deliveries.c.report, mode)
+    @app.get("/v1/runs/{delivery_id}/promotion")
+    def read_promotion(
+        delivery_id: str, response: Response, principal: Principal = Depends(authenticate),
+    ) -> PromotionDetail:
+        run = load_run(principal, delivery_id, deliveries.c.state, deliveries.c.commit_sha, deliveries.c.report,
+                       mode, role="approver")
+        targets = projects[run["repository_id"]].targets
         report = run["report"] or {}
         if delivery_id.startswith("demo-") or run["evaluation_mode"] != "build_endpoints" or run["state"] != "completed":
             raise ReadError(409, "run_not_eligible", "A completed build evaluation from a GitHub delivery is required")
-        if not is_current_candidate(run) or report["builds"].get("baseline") != targets.baseline.build.model_dump():
+        if not is_current_candidate(run, targets) or report["builds"].get("baseline") != targets.baseline.build.model_dump():
             raise ReadError(409, "stale_candidate", "The evaluated build pair must match the configured build pair")
         if report.get("verdict") != "pass":
             raise ReadError(409, "gate_not_passed", "The release gate must pass before rollout")
@@ -483,9 +535,11 @@ def create_app():
         response.headers["Cache-Control"] = "no-store"
         return PromotionDetail(run_id=delivery_id, baseline=targets.baseline.build, candidate=targets.candidate.build)
 
-    @app.post("/v1/runs/{delivery_id}/deployments", dependencies=[Depends(require_approver)])
-    def record_deployment(delivery_id: str, body: DeploymentObservation) -> DeploymentDetail:
-        run = load_run(delivery_id, deliveries.c.state, deliveries.c.report, mode)
+    @app.post("/v1/runs/{delivery_id}/deployments")
+    def record_deployment(
+        delivery_id: str, body: DeploymentObservation, principal: Principal = Depends(authenticate),
+    ) -> DeploymentDetail:
+        run = load_run(principal, delivery_id, deliveries.c.state, deliveries.c.report, mode, role="approver")
         report = run["report"] or {}
         if (delivery_id.startswith("demo-") or run["evaluation_mode"] != "build_endpoints"
                 or run["state"] != "completed" or report.get("verdict") != "pass"):
@@ -520,9 +574,11 @@ def create_app():
             values = {**existing, "recorded_at": as_utc(existing["recorded_at"])}
         return DeploymentDetail(**values)
 
-    @app.post("/v1/runs/{delivery_id}/investigations", status_code=202, dependencies=[Depends(require_maintainer)])
-    def start_investigation(delivery_id: str, body: InvestigationRequest) -> QueuedInvestigation:
-        run = load_run(delivery_id, deliveries.c.state, deliveries.c.report, mode)
+    @app.post("/v1/runs/{delivery_id}/investigations", status_code=202)
+    def start_investigation(
+        delivery_id: str, body: InvestigationRequest, principal: Principal = Depends(authenticate),
+    ) -> QueuedInvestigation:
+        run = load_run(principal, delivery_id, deliveries.c.state, deliveries.c.report, mode, role="maintainer")
         if run["evaluation_mode"] != "synthetic_fixture" or run["state"] != "completed" or run["report"] is None:
             raise ReadError(409, "run_not_investigable", "A completed synthetic evaluation is required")
         case = run["report"]["candidate"]["results"].get(body.case_id)
@@ -532,14 +588,17 @@ def create_app():
             raise ReadError(409, "case_not_failed", "A failed candidate case is required")
         return QueuedInvestigation(investigation_id=enqueue_investigation(engine, delivery_id, body.case_id))
 
-    @app.get("/v1/runs/{delivery_id}/investigations/{investigation_id}", dependencies=[Depends(require_read)])
-    def read_investigation(delivery_id: str, investigation_id: str) -> InvestigationDetail:
+    @app.get("/v1/runs/{delivery_id}/investigations/{investigation_id}")
+    def read_investigation(
+        delivery_id: str, investigation_id: str, principal: Principal = Depends(authenticate),
+    ) -> InvestigationDetail:
         with engine.connect() as connection:
             result = connection.execute(select(
                 investigations.c.id.label("investigation_id"), investigations.c.case_id,
                 investigations.c.state, investigations.c.report,
             ).join(deliveries, deliveries.c.id == investigations.c.run_id).where(
-                *scope, investigations.c.run_id == delivery_id, investigations.c.id == investigation_id,
+                allowed_projects(principal), investigations.c.run_id == delivery_id,
+                investigations.c.id == investigation_id,
             )).mappings().one_or_none()
         if result is None:
             raise ReadError(404, "investigation_missing", "Investigation was not found")

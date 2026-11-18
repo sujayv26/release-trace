@@ -1,6 +1,6 @@
 # API
 
-The FastAPI service exposes JSON endpoints and interactive API docs at `/docs`. Run access is scoped to the configured repository and installation. Send `Authorization: Bearer <token>` on `/v1` requests.
+The FastAPI service exposes JSON endpoints and interactive API docs at `/docs`. Run access is scoped to a configured repository and installation and the caller's project membership. Send `Authorization: Bearer <key>` on `/v1` requests. Managed accounts use individual keys. The table lists the equivalent shared roles for the single-project local demo.
 
 | Configured token | Permissions |
 |---|---|
@@ -11,6 +11,7 @@ The FastAPI service exposes JSON endpoints and interactive API docs at `/docs`. 
 | Method and path | Contract |
 |---|---|
 | POST /webhooks/github | Verify the raw-body signature and installation scope, persist by delivery ID, return 202 |
+| GET /v1/me | Return the authenticated account handle and its permitted projects and roles. Project IDs are strings. The local demo uses a null handle. |
 | GET /v1/projects/{id}/runs | Browse runs with cursor pagination |
 | GET /v1/runs/{id} | Return state, evaluation report, GitHub Check status, saved approval, latest recorded rollout outcome, and available reviewer actions |
 | GET /v1/runs/{id}/cases | Page through case results, optionally filter for failures |

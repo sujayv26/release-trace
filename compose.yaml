@@ -65,7 +65,6 @@ services:
       dockerfile: dashboard/Dockerfile
     environment:
       RELEASETRACE_API_URL: http://api:8000
-      RELEASETRACE_REPOSITORY_ID: "1"
     ports:
       - "127.0.0.1:${RELEASETRACE_DASHBOARD_PORT:-3000}:3000"
     depends_on:

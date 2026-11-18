@@ -110,8 +110,9 @@ def evaluate_builds(client, targets, fixture, suite, tokens=None):
     }
 
 
-def evaluate_configured_builds(targets, fixture, suite):
-    tokens = {variant: os.getenv(f"RELEASETRACE_{variant.upper()}_EVALUATION_TOKEN")
+def evaluate_configured_builds(targets, fixture, suite, *, repository_id=None):
+    suffix = f"_{repository_id}" if repository_id is not None else ""
+    tokens = {variant: os.getenv(f"RELEASETRACE_{variant.upper()}_EVALUATION_TOKEN{suffix}")
               for variant in ("baseline", "candidate")}
     with httpx.Client(timeout=RESPONSE_TIMEOUT, follow_redirects=False, trust_env=False) as client:
         return evaluate_builds(client, targets, fixture, suite, tokens)

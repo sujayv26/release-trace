@@ -61,6 +61,27 @@ deployments = Table(
     Column("recorded_at", DateTime(timezone=True), nullable=False),
     Index("ix_deployments_run_recorded", "run_id", "recorded_at"),
 )
+accounts = Table(
+    "accounts",
+    metadata,
+    Column("handle", String(64), primary_key=True),
+    Column("key_hash", String(64), unique=True),
+)
+project_owners = Table(
+    "project_owners",
+    metadata,
+    Column("repository_id", BigInteger, primary_key=True, autoincrement=False),
+    Column("organization", String(63), nullable=False),
+)
+project_memberships = Table(
+    "project_memberships",
+    metadata,
+    Column("handle", ForeignKey("accounts.handle"), primary_key=True),
+    Column("repository_id", BigInteger, primary_key=True),
+    Column("installation_id", BigInteger, primary_key=True),
+    Column("organization", String(63), primary_key=True),
+    Column("role", String(10), nullable=False),
+)
 
 
 def database():
@@ -108,7 +129,10 @@ def process_one(engine, delivery_id=None):
         fixture, suite = job.inputs["fixture"], job.inputs["suite"]
         if job.inputs.get("evaluation_mode") == "build_endpoints":
             targets = BuildTargets.model_validate(job.inputs["build_targets"])
-            report = evaluate_configured_builds(targets, fixture, suite)
+            if job.inputs.get("project_scoped_tokens"):
+                report = evaluate_configured_builds(targets, fixture, suite, repository_id=job.repository_id)
+            else:
+                report = evaluate_configured_builds(targets, fixture, suite)
         else:
             report = run_suite(fixture, suite)
         connection.execute(update(deliveries).where(deliveries.c.id == job.id).values(

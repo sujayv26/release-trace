@@ -37,7 +37,7 @@ export default async function RunPage({ params, searchParams }: {
   const report = cases.state === 'completed' ? run.report : null;
   return (
     <>
-      <Link href="/">← Release history</Link>
+      <Link href={{ pathname: '/', query: { project: run.project_id } }}>← Release history</Link>
       <h1>Release evaluation</h1>
       {investigation === 'access' && <p role="alert">A maintainer token is required to start an investigation.</p>}
       {investigation === 'unavailable' && <p role="alert">The investigation could not be started. Try again shortly.</p>}

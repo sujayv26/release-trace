@@ -4,6 +4,15 @@ import { cookies } from 'next/headers';
 export const accessCookie = 'releasetrace-viewer';
 type EvaluationMode = 'synthetic_fixture' | 'build_endpoints';
 
+export type Project = {
+  id: string;
+  name: string;
+  organization: string;
+  role: 'viewer' | 'maintainer' | 'approver';
+};
+
+export type Account = { handle: string | null; projects: Project[] };
+
 export type Run = {
   id: string;
   commit_sha: string;
@@ -40,6 +49,7 @@ type Report = {
 };
 export type RunDetail = {
   id: string;
+  project_id: string;
   commit_sha: string;
   state: string;
   created_at: string | null;
@@ -90,10 +100,8 @@ export async function viewerToken() {
   return (await cookies()).get(accessCookie)?.value;
 }
 
-export function historyPath() {
-  const repository = process.env.RELEASETRACE_REPOSITORY_ID;
-  if (!repository || !/^\d+$/.test(repository)) throw new Error('Repository ID is missing');
-  return `/v1/projects/${repository}/runs`;
+export function historyPath(project: Project) {
+  return `/v1/projects/${encodeURIComponent(project.id)}/runs`;
 }
 
 export async function readApi<T>(path: string, token: string, body?: object): Promise<T> {

@@ -13,6 +13,7 @@ import httpx
 from fastapi.testclient import TestClient
 from staging import promote_approved
 
+from . import accounts as manage_accounts
 from .api import PromotionDetail, create_app
 from .evaluate_builds import FIXTURES, BuildTargets, evaluate_builds
 from .github_check import BUILD_CHECK_NAME, check_payload, completed_run
@@ -22,6 +23,121 @@ from .store import database, enqueue, process_one
 
 
 class PipelineTest(unittest.TestCase):
+    def test_managed_accounts_isolate_runs_and_roles(self):
+        targets = BuildTargets.model_validate_json((FIXTURES / "passing_build_targets.json").read_bytes())
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as cleanup:
+            config = Path(directory, "projects.json")
+            Path(directory, "targets.json").write_text(targets.model_dump_json(), encoding="utf-8")
+            config.write_text(json.dumps({"projects": [
+                {"repository_id": 51, "installation_id": 61, "organization": "alpha-team", "name": "Support"},
+                {"repository_id": 52, "installation_id": 62, "organization": "beta-team", "name": "Help desk",
+                 "build_targets_file": "targets.json"},
+            ]}), encoding="utf-8")
+            db_path = Path(directory, "accounts.db").as_posix()
+            with patch.dict(os.environ, {
+                "RELEASETRACE_DATABASE_URL": os.getenv("RELEASETRACE_TEST_DATABASE_URL", f"sqlite:///{db_path}"),
+                "RELEASETRACE_PROJECTS_FILE": str(config),
+                "RELEASETRACE_WEBHOOK_SECRET": "managed-test-secret",
+                "RELEASETRACE_READ_TOKEN": "legacy-viewer",
+                "RELEASETRACE_CANDIDATE_EVALUATION_TOKEN": "legacy-token",
+                "RELEASETRACE_CANDIDATE_EVALUATION_TOKEN_51": "another-project-token",
+                "RELEASETRACE_CANDIDATE_EVALUATION_TOKEN_52": "beta-target-token",
+            }):
+                engine = database()
+                cleanup.callback(engine.dispose)
+                upgrade_database(engine)
+
+                def provision(*arguments):
+                    output = StringIO()
+                    with patch("sys.argv", ["accounts", *arguments]), redirect_stdout(output):
+                        manage_accounts.main()
+                    return output.getvalue().strip()
+
+                def bearer(key):
+                    return {"Authorization": f"Bearer {key}"}
+
+                alice = bearer(provision("create", "alpha-maintainer"))
+                bob = bearer(provision("create", "beta-approver"))
+                unassigned = bearer(provision("create", "no-project"))
+                provision("grant", "alpha-maintainer", "51", "maintainer")
+                provision("grant", "beta-approver", "52", "approver")
+
+                with TestClient(create_app()) as client:
+                    def push(repository, installation, sha, delivery_id):
+                        body = json.dumps({
+                            "after": sha, "ref": "refs/heads/main", "deleted": False,
+                            "repository": {"id": repository}, "installation": {"id": installation},
+                        }).encode()
+                        return client.post("/webhooks/github", content=body, headers={
+                            "X-GitHub-Event": "push", "X-GitHub-Delivery": delivery_id,
+                            "X-Hub-Signature-256": "sha256=" + hmac.digest(b"managed-test-secret", body, "sha256").hex(),
+                        })
+
+                    self.assertEqual(client.get("/v1/me", headers=bearer("legacy-viewer")).status_code, 401)
+                    self.assertEqual(client.get("/v1/me", headers=unassigned).json()["projects"], [])
+                    self.assertEqual(client.get("/v1/me", headers=alice).json(), {
+                        "handle": "alpha-maintainer",
+                        "projects": [{"id": "51", "organization": "alpha-team", "name": "Support", "role": "maintainer"}],
+                    })
+                    self.assertEqual(push(51, 62, "a" * 40, "forged-scope").status_code, 403)
+                    self.assertEqual(push(51, 61, "a" * 40, "managed-alpha").json()["status"], "queued")
+                    self.assertEqual(push(52, 62, targets.candidate.build.commit_sha, "managed-beta").json()["status"], "queued")
+                    self.assertEqual(process_one(engine), "managed-alpha")
+
+                    def evaluate_target(request):
+                        variant = "candidate" if request.url.port == 8102 else "baseline"
+                        if variant == "candidate":
+                            self.assertEqual(request.headers["authorization"], "Bearer beta-target-token")
+                        policies = {case["case_id"]: case["required_citation"] for case in [
+                            json.loads((FIXTURES / "fixture.json").read_bytes()),
+                            *json.loads((FIXTURES / "gate_suite.json").read_bytes())["cases"],
+                        ]}
+                        case_id = json.loads(request.content)["case_id"]
+                        return httpx.Response(200, json={
+                            "build": getattr(targets, variant).build.model_dump(), "citation": policies[case_id],
+                        })
+
+                    with httpx.Client(transport=httpx.MockTransport(evaluate_target)) as evaluator:
+                        with patch("service.evaluate_builds.httpx.Client", return_value=nullcontext(evaluator)):
+                            self.assertEqual(process_one(engine), "managed-beta")
+                    alpha, beta = "/v1/runs/managed-alpha", "/v1/runs/managed-beta"
+                    self.assertEqual(client.get(alpha, headers=unassigned).status_code, 404)
+                    report = client.post(f"{alpha}/investigations", headers=alice, json={"case_id": "account-closure"})
+                    self.assertEqual(report.status_code, 202)
+                    investigation_path = f"{alpha}/investigations/{report.json()['investigation_id']}"
+                    for path in ("/v1/projects/51/runs", alpha, f"{alpha}/cases", investigation_path):
+                        self.assertEqual(client.get(path, headers=bob).status_code, 404)
+                    for path in ("/v1/projects/52/runs", beta, f"{beta}/cases", f"{beta}/promotion"):
+                        self.assertEqual(client.get(path, headers=alice).status_code, 404)
+
+                    decision = {"image_digest": targets.candidate.build.image_digest, "decision": "approve"}
+                    self.assertEqual(client.post(f"{beta}/approval", headers=alice, json=decision).status_code, 404)
+                    provision("grant", "alpha-maintainer", "52", "viewer")
+                    self.assertEqual(len(client.get("/v1/me", headers=alice).json()["projects"]), 2)
+                    self.assertEqual(client.get(beta, headers=alice).json()["report"]["verdict"], "pass")
+                    self.assertEqual(client.post(f"{beta}/approval", headers=alice, json=decision).status_code, 403)
+                    approved = client.post(f"{beta}/approval", headers=bob, json=decision).raise_for_status().json()
+                    self.assertEqual(approved["actor"], "beta-approver")
+                    self.assertEqual(client.get(f"{beta}/promotion", headers=bob).status_code, 200)
+
+                    provision("revoke", "alpha-maintainer", "52")
+                    self.assertEqual(client.get(beta, headers=alice).status_code, 404)
+                    rotated = bearer(provision("rotate", "alpha-maintainer"))
+                    self.assertEqual(client.get(alpha, headers=alice).status_code, 401)
+                    self.assertEqual(client.get(alpha, headers=rotated).status_code, 200)
+                    provision("disable", "alpha-maintainer")
+                    self.assertEqual(client.get(alpha, headers=rotated).status_code, 401)
+
+                changed = json.loads(config.read_bytes())
+                changed["projects"][0]["organization"] = "gamma-team"
+                config.write_text(json.dumps(changed), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "cannot change organization"):
+                    create_app()
+                with patch.dict(os.environ, {"RELEASETRACE_PROJECTS_FILE": "", "RELEASETRACE_REPOSITORY_ID": "51",
+                                             "RELEASETRACE_INSTALLATION_ID": "61"}):
+                    with self.assertRaisesRegex(ValueError, "return to shared-token access"):
+                        create_app()
+
     def test_build_push_persists_scoped_result_and_check(self):
         path = FIXTURES / "build_targets.json"
         pinned = BuildTargets.model_validate_json(path.read_bytes())

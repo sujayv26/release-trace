@@ -2,13 +2,13 @@
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { accessCookie, historyPath, readApi, ReleaseApiError, viewerToken } from '../lib/releases';
+import { accessCookie, readApi, ReleaseApiError, viewerToken } from '../lib/releases';
 
 export async function signIn(form: FormData) {
   const token = form.get('token');
   if (typeof token !== 'string' || !/^[!-~]{1,512}$/.test(token)) redirect('/?access=invalid');
   try {
-    await readApi(`${historyPath()}?limit=1`, token);
+    await readApi('/v1/me', token);
   } catch (error) {
     if (error instanceof ReleaseApiError && error.status === 401) redirect('/?access=invalid');
     redirect('/?access=unavailable');

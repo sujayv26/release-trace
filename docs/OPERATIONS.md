@@ -43,6 +43,62 @@ Run `python -m service.store` before starting an updated API or worker. It
 applies pending Alembic migrations and preserves existing demo runs. Runs
 saved before timestamp tracking show their original times as unavailable.
 
+### Configure managed projects and reviewer accounts
+
+Set `RELEASETRACE_PROJECTS_FILE` on the API and operator CLI to an absolute path
+to a server-managed JSON file. List the GitHub repository and installation IDs
+that may send pushes. Use a stable organization slug and a display name for
+each project. A build targets file is optional. Its path is relative to the
+project file unless it is absolute.
+
+```json
+{
+  "projects": [
+    {
+      "repository_id": 12345,
+      "installation_id": 67890,
+      "organization": "support-team",
+      "name": "Support application",
+      "build_targets_file": "support-builds.json"
+    }
+  ]
+}
+```
+
+Apply the migrations and provision accounts from a private operator terminal
+with the same database URL and project file as the API.
+
+```bash
+python -m service.store
+python -m service.accounts create release-reviewer
+python -m service.accounts grant release-reviewer 12345 approver
+python -m uvicorn service.api:create_app --factory
+```
+
+The create command displays an individual access key once and the database
+stores a hash. Share the key privately with the reviewer. They enter it in
+the dashboard and can switch between projects with active memberships. Grant
+`viewer`, `maintainer`, or `approver` per project. To update a role, run
+`grant` again. Use `revoke HANDLE REPOSITORY_ID` to remove a membership,
+`rotate HANDLE` to replace a key, or `disable HANDLE` to invalidate it.
+An approval records the authenticated account handle.
+
+Install the same GitHub App on the listed repositories and configure its
+webhook secret on the API. Rotate the secret on the API when it changes in
+GitHub. If an evaluation target requires authentication, configure
+`RELEASETRACE_BASELINE_EVALUATION_TOKEN_<repository_id>` and
+`RELEASETRACE_CANDIDATE_EVALUATION_TOKEN_<repository_id>` on the evaluation
+worker. Each GitHub Check publisher still uses its own repository and
+installation configuration. Run the existing publisher command per scope
+when publishing to multiple repositories.
+
+Serve the hosted dashboard and webhook over HTTPS. Managed mode accepts only
+individual account keys. The database pins each managed repository to its
+organization at startup, and the API rejects a configuration that moves a
+repository to another organization or switches it back to shared tokens.
+Restart API instances together when the project directory or build targets
+change. After an installation change, grant access under the new installation.
+
 In the second terminal, run `python -m service.worker`. A signed GitHub App
 branch push to `/webhooks/github` queues one job per delivery ID. Read its state
 and evidence at `/v1/runs/{delivery_id}` with the configured bearer token. The
@@ -72,8 +128,8 @@ API on port 8000. Set the same repository ID, installation ID, and webhook
 secret in the terminal running the seed command. The worker picks up the sample
 delivery and saves the gate decision. Repeating the command reuses that delivery.
 
-The dashboard requires Node.js 20.9 or newer. Give the dashboard process the
-same `RELEASETRACE_REPOSITORY_ID` as the API. The dashboard uses
+The dashboard requires Node.js 20.9 or newer. It discovers available projects
+from the API after sign-in and uses
 `http://127.0.0.1:8000` by default. Set `RELEASETRACE_API_URL` if the API runs at
 a different address.
 
