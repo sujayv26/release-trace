@@ -269,6 +269,21 @@ to the same configuration before accepting approvals for a new candidate.
 Requests for a superseded candidate return HTTP 409. The endpoint records a
 decision in the database.
 
+## Run the staging canary drill
+
+The canary workflow creates a disposable kind cluster and runs Argo Rollouts
+against a synthetic HTTP service. It promotes a healthy revision, then
+submits an unhealthy revision that returns HTTP 503. The drill verifies that
+the analysis fails, the controller aborts, and the stable service still serves
+the healthy revision. The GitHub Actions workflow uploads
+`rollout-evidence.json` with ReplicaSet hashes, AnalysisRun names, and measured
+time to detection and to the stable service probe.
+
+For a local drill, install Argo Rollouts in a test cluster and create a fresh
+namespace. Run `python staging/run_drill.py --context YOUR_TEST_CONTEXT --namespace YOUR_DRILL_NAMESPACE`.
+The drill uses synthetic revisions. Deployments driven by saved ReleaseTrace
+approvals remain a separate integration step.
+
 ## Investigate a failed synthetic case
 
 Apply migrations with `python -m service.store` and configure a separate

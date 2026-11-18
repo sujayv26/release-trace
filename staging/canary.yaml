@@ -1,0 +1,114 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: stable
+spec:
+  selector:
+    app: release-drill
+  ports:
+    - port: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: canary
+spec:
+  selector:
+    app: release-drill
+  ports:
+    - port: 8080
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: canary-health
+spec:
+  metrics:
+    - name: healthy-response
+      count: 1
+      failureLimit: 0
+      provider:
+        job:
+          spec:
+            activeDeadlineSeconds: 60
+            backoffLimit: 0
+            template:
+              spec:
+                restartPolicy: Never
+                automountServiceAccountToken: false
+                containers:
+                  - name: probe
+                    image: python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
+                    command:
+                      - python
+                      - -c
+                      - |
+                        import time
+                        from urllib.error import HTTPError, URLError
+                        from urllib.request import urlopen
+
+                        for attempt in range(10):
+                            try:
+                                with urlopen("http://canary:8080", timeout=2) as response:
+                                    if response.read() == b"healthy":
+                                        break
+                            except HTTPError:
+                                raise
+                            except (URLError, TimeoutError):
+                                pass
+                            time.sleep(1)
+                        else:
+                            raise SystemExit("Canary service was unreachable")
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: release-drill
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: release-drill
+  strategy:
+    canary:
+      stableService: stable
+      canaryService: canary
+      abortScaleDownDelaySeconds: 1
+      steps:
+        - setWeight: 50
+        - analysis:
+            templates:
+              - templateName: canary-health
+  template:
+    metadata:
+      labels:
+        app: release-drill
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: demo
+          image: python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
+          env:
+            - name: REVISION
+              value: baseline
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            periodSeconds: 1
+          command:
+            - python
+            - -c
+            - |
+              import os
+              from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+              class Handler(BaseHTTPRequestHandler):
+                  def do_GET(self):
+                      revision = os.environ["REVISION"]
+                      self.send_response(503 if revision == "unhealthy" else 200)
+                      self.end_headers()
+                      self.wfile.write(revision.encode())
+
+              ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

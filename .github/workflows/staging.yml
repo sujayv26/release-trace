@@ -1,0 +1,43 @@
+name: ReleaseTrace canary drill
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'staging/**'
+      - '.github/workflows/staging.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Create isolated Kubernetes cluster
+        uses: helm/kind-action@v1.12.0
+        with:
+          cluster_name: releasetrace
+      - name: Install Argo Rollouts
+        run: |
+          kubectl create namespace argo-rollouts
+          kubectl apply --namespace argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/download/v1.8.3/install.yaml
+          kubectl rollout status deployment/argo-rollouts --namespace argo-rollouts --timeout=120s
+          kubectl create namespace release-drill
+      - name: Observe promotion and automatic abort
+        run: |
+          set -o pipefail
+          python staging/run_drill.py --context kind-releasetrace --namespace release-drill | tee rollout-evidence.json
+      - name: Save measured rollout evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollout-evidence
+          path: rollout-evidence.json
+      - name: Inspect controller state on failure
+        if: failure()
+        run: |
+          kubectl get rollouts,analysisruns,replicasets,pods,services --namespace release-drill -o yaml
+          kubectl logs deployment/argo-rollouts --namespace argo-rollouts --tail=80
