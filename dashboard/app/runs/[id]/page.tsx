@@ -82,6 +82,19 @@ export default async function RunPage({ params, searchParams }: {
               </>}
             </dl>
           </details>
+          {run.approval?.decision === 'approve' && (
+            <section className="panel provenance" aria-labelledby="rollout-heading">
+              <h2 id="rollout-heading">Rollout</h2>
+              {run.deployment ? <>
+                <p><Status value={run.deployment.outcome} /> · Recorded <RunTime value={run.deployment.recorded_at} /></p>
+                <dl>
+                  <dt>Rollout</dt><dd><code>{run.deployment.namespace}/{run.deployment.rollout}</code></dd>
+                  <dt>Candidate digest</dt><dd><code>{run.deployment.image_digest}</code></dd>
+                  <dt>Stable revision digest</dt><dd><code>{run.deployment.stable_image_digest}</code></dd>
+                </dl>
+              </> : <p>Awaiting an observed rollout outcome.</p>}
+            </section>
+          )}
           <section aria-labelledby="cases-heading">
             <div className="case-heading">
               <h2 id="cases-heading">Case results</h2>

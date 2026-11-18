@@ -37,8 +37,8 @@ button { cursor: pointer; }
 .quiet { background: var(--surface); color: var(--ink); border: 1px solid var(--border); }
 [role="alert"] { color: #922929; }
 .status { display: inline-block; color: #37475a; background: #edf1f7; border-radius: .3rem; padding: .12rem .47rem; font-size: .82rem; font-weight: 650; text-transform: capitalize; }
-.status[data-status="pass"] { color: #195638; background: #e1f4e7; }
-.status[data-status="block"], .status[data-status="fail"] { color: #922929; background: #fce8e8; }
+.status[data-status="pass"], .status[data-status="promoted"] { color: #195638; background: #e1f4e7; }
+.status[data-status="block"], .status[data-status="fail"], .status[data-status="aborted"] { color: #922929; background: #fce8e8; }
 .status[data-status="inconclusive"] { color: #775006; background: #fff2ce; }
 .table-scroll { overflow: auto; padding: 0; }
 table { width: 100%; border-collapse: collapse; text-align: left; }

@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Literal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -21,7 +21,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .evaluate_builds import BuildIdentity, BuildTargets, ImageDigest
 from .investigator import enqueue_investigation, investigation_key
-from .store import approvals, database, deliveries, enqueue, investigations
+from .store import approvals, database, deliveries, deployments, enqueue, investigations
 
 MAX_BODY = 1024 * 1024
 DELIVERY_ID = re.compile(r"[A-Za-z0-9-]{1,128}")
@@ -119,6 +119,21 @@ class PromotionDetail(BaseModel):
     run_id: str
     baseline: BuildIdentity
     candidate: BuildIdentity
+
+
+class DeploymentObservation(BaseModel):
+    rollout_uid: UUID
+    generation: Annotated[int, Field(strict=True, ge=1, le=2**63 - 1)]
+    namespace: Annotated[str, Field(max_length=63, pattern=r"^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$")]
+    rollout: Annotated[str, Field(max_length=253, pattern=r"^[a-z0-9](?:[-.a-z0-9]*[a-z0-9])?$")]
+    outcome: Literal["promoted", "aborted"]
+    image_digest: ImageDigest
+    stable_image_digest: ImageDigest
+
+
+class DeploymentDetail(DeploymentObservation):
+    run_id: str
+    recorded_at: datetime
 
 
 class QueuedInvestigation(BaseModel):
@@ -286,6 +301,7 @@ def create_app():
             connection.execute(select(deliveries.c.created_at, deliveries.c.github_check_id).limit(1))
             connection.execute(select(investigations.c.id).limit(1))
             connection.execute(select(approvals.c.run_id).limit(1))
+            connection.execute(select(deployments.c.run_id).limit(1))
         return {"status": "ready"}
 
     @app.post("/webhooks/github", response_model=Accepted, status_code=202)
@@ -352,11 +368,19 @@ def create_app():
             deliveries.c.github_check_retry_at, mode,
         )
         approval = None
+        deployment = None
         if result["evaluation_mode"] == "build_endpoints":
             with engine.connect() as connection:
                 approval = connection.execute(select(approvals).where(
                     approvals.c.run_id == delivery_id,
                 )).mappings().one_or_none()
+                if approval is not None:
+                    deployment = connection.execute(select(deployments).where(
+                        deployments.c.run_id == delivery_id,
+                    ).order_by(
+                        deployments.c.recorded_at.desc(), deployments.c.rollout_uid,
+                        deployments.c.generation.desc(), deployments.c.outcome,
+                    ).limit(1)).mappings().one_or_none()
         return {
             **result,
             "created_at": as_utc(result["created_at"]),
@@ -365,6 +389,9 @@ def create_app():
             "can_investigate": is_maintainer(request) and result["evaluation_mode"] == "synthetic_fixture"
             and result["state"] == "completed",
             "approval": ApprovalDetail(**{**approval, "created_at": as_utc(approval["created_at"])}) if approval else None,
+            "deployment": DeploymentDetail(
+                **{**deployment, "recorded_at": as_utc(deployment["recorded_at"])}
+            ) if deployment else None,
             "can_record_decision": is_approver(request) and approval is None
             and result["evaluation_mode"] == "build_endpoints" and result["state"] == "completed"
             and is_current_candidate(result),
@@ -455,6 +482,43 @@ def create_app():
             raise ReadError(409, "approval_required", "A saved approval for the candidate digest is required")
         response.headers["Cache-Control"] = "no-store"
         return PromotionDetail(run_id=delivery_id, baseline=targets.baseline.build, candidate=targets.candidate.build)
+
+    @app.post("/v1/runs/{delivery_id}/deployments", dependencies=[Depends(require_approver)])
+    def record_deployment(delivery_id: str, body: DeploymentObservation) -> DeploymentDetail:
+        run = load_run(delivery_id, deliveries.c.state, deliveries.c.report, mode)
+        report = run["report"] or {}
+        if (delivery_id.startswith("demo-") or run["evaluation_mode"] != "build_endpoints"
+                or run["state"] != "completed" or report.get("verdict") != "pass"):
+            raise ReadError(409, "run_not_eligible", "A passing build evaluation from a GitHub delivery is required")
+        builds = report.get("builds", {})
+        candidate = builds.get("candidate", {}).get("image_digest")
+        stable_variant = "candidate" if body.outcome == "promoted" else "baseline"
+        stable = builds.get(stable_variant, {}).get("image_digest")
+        if (body.image_digest, body.stable_image_digest) != (candidate, stable):
+            raise ReadError(409, "deployment_digest_mismatch", "Observed digests do not match the evaluated builds")
+        values = {
+            **body.model_dump(mode="json"), "run_id": delivery_id, "recorded_at": datetime.now(timezone.utc),
+        }
+        try:
+            with engine.begin() as connection:
+                approval = connection.execute(select(approvals.c.decision, approvals.c.image_digest).where(
+                    approvals.c.run_id == delivery_id,
+                )).one_or_none()
+                if approval != ("approve", body.image_digest):
+                    raise ReadError(409, "approval_required", "A saved approval for the candidate digest is required")
+                connection.execute(deployments.insert().values(**values))
+        except IntegrityError:
+            with engine.connect() as connection:
+                existing = connection.execute(select(deployments).where(
+                    deployments.c.run_id == delivery_id, deployments.c.rollout_uid == str(body.rollout_uid),
+                    deployments.c.generation == body.generation, deployments.c.outcome == body.outcome,
+                )).mappings().one_or_none()
+            if existing is None:
+                raise
+            if any(existing[key] != value for key, value in body.model_dump(mode="json").items()):
+                raise ReadError(409, "deployment_conflict", "A different observation already exists for this outcome")
+            values = {**existing, "recorded_at": as_utc(existing["recorded_at"])}
+        return DeploymentDetail(**values)
 
     @app.post("/v1/runs/{delivery_id}/investigations", status_code=202, dependencies=[Depends(require_maintainer)])
     def start_investigation(delivery_id: str, body: InvestigationRequest) -> QueuedInvestigation:

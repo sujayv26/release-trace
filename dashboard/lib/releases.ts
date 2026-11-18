@@ -50,6 +50,14 @@ export type RunDetail = {
   can_investigate: boolean;
   can_record_decision: boolean;
   approval: { decision: 'approve' | 'reject'; image_digest: string; actor: string; created_at: string } | null;
+  deployment: {
+    namespace: string;
+    rollout: string;
+    outcome: 'promoted' | 'aborted';
+    image_digest: string;
+    stable_image_digest: string;
+    recorded_at: string;
+  } | null;
   report: Report | null;
 };
 

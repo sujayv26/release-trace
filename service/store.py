@@ -47,6 +47,20 @@ approvals = Table(
     Column("actor", String(128), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
+deployments = Table(
+    "deployments",
+    metadata,
+    Column("run_id", ForeignKey("approvals.run_id"), primary_key=True),
+    Column("rollout_uid", String(36), primary_key=True),
+    Column("generation", BigInteger, primary_key=True),
+    Column("outcome", String(8), primary_key=True),
+    Column("namespace", String(63), nullable=False),
+    Column("rollout", String(253), nullable=False),
+    Column("image_digest", String(71), nullable=False),
+    Column("stable_image_digest", String(71), nullable=False),
+    Column("recorded_at", DateTime(timezone=True), nullable=False),
+    Index("ix_deployments_run_recorded", "run_id", "recorded_at"),
+)
 
 
 def database():

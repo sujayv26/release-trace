@@ -253,8 +253,13 @@ same arguments again to check whether the candidate is already configured.
 
 Keep candidate configuration consistent across serving API instances and
 coordinate target configuration changes with staging submissions.
-`submitted` means Kubernetes accepted the patch. Observe the Rollout and its
-AnalysisRuns to confirm the outcome.
+`submitted` means Kubernetes accepted the patch. Add `--apply --observe 120`
+to record the terminal outcome on the release page. The observer waits for
+Argo to report the submitted generation and checks the available stable
+ReplicaSet's digest. Grant the operator permission to list ReplicaSets in
+the Rollout namespace when using this option. If the wait times out, rerun
+with `--observe 120` to resume observation of the already configured
+candidate while the evaluated build pair remains current.
 
 ### Rehearse the complete path in CI
 
@@ -268,8 +273,8 @@ evaluated digest.
 
 The staging command submits that digest to Argo in kind. The inline analysis
 checks the canary's reported identity and account-closure citation. The
-rehearsal then checks the running Pods' image IDs and calls the stable
-Service. Download `approved-rollout-evidence.json` from the
+rehearsal checks that the viewer can read the saved outcome, verifies the
+running Pods' image IDs, and calls the stable Service. Download `approved-rollout-evidence.json` from the
 `approved-rollout-evidence` artifact to compare the approved digest,
 submitted reference, stable Pod identities, and successful AnalysisRun.
 

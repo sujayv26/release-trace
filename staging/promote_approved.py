@@ -5,15 +5,17 @@ import json
 import os
 import re
 import subprocess
+import time
 from urllib.parse import urlsplit
 
 import httpx
 from pydantic import ValidationError
 
-from service.api import DELIVERY_ID, PromotionDetail
+from service.api import DELIVERY_ID, DeploymentObservation, PromotionDetail
 from service.evaluate_builds import LOOPBACK
 
 RESOURCE_NAME = re.compile(r"[a-z0-9](?:[-.a-z0-9]*[a-z0-9])?")
+HASH_LABEL = "rollouts-pod-template-hash"
 
 
 def rollout_patch(rollout, container, promotion):
@@ -43,6 +45,43 @@ def rollout_patch(rollout, container, promotion):
     ]
 
 
+def observe_rollout(get, resource, submitted, container, image, promotion, timeout):
+    uid = submitted["uid"]
+    generation = submitted["generation"]
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        rollout = get(resource)
+        metadata = rollout["metadata"]
+        containers = rollout["spec"]["template"]["spec"]["containers"]
+        if (metadata["uid"] != uid or metadata["generation"] != generation
+                or not any(item["name"] == container and item["image"] == image for item in containers)):
+            raise ValueError("The Rollout changed while waiting for the approved generation")
+        status = rollout.get("status", {})
+        stable, current = status.get("stableRS"), status.get("currentPodHash")
+        if str(generation) == str(status.get("observedGeneration")) and stable and current:
+            outcome = None
+            if status.get("abort") is True and current != stable:
+                outcome, expected = "aborted", promotion.baseline.image_digest
+            elif status.get("phase") == "Healthy" and current == stable and not status.get("abort"):
+                outcome, expected = "promoted", promotion.candidate.image_digest
+            if outcome:
+                replicasets = get("replicasets", "-l", f"{HASH_LABEL}={stable}")["items"]
+                for replica in replicasets:
+                    owned = any(owner.get("uid") == uid and owner.get("controller") is True
+                                for owner in replica["metadata"].get("ownerReferences", []))
+                    ready = replica.get("status", {}).get("availableReplicas", 0)
+                    images = replica["spec"]["template"]["spec"]["containers"]
+                    if owned and ready and any(item["name"] == container and item["image"].endswith(f"@{expected}")
+                                               for item in images):
+                        return DeploymentObservation(
+                            rollout_uid=uid, generation=generation, namespace=metadata["namespace"],
+                            rollout=metadata["name"], outcome=outcome, image_digest=promotion.candidate.image_digest,
+                            stable_image_digest=expected,
+                        )
+        time.sleep(min(1, max(0, deadline - time.monotonic())))
+    raise ValueError("Rollout outcome was not confirmed before the timeout. Use --observe again to resume.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_id")
@@ -52,12 +91,15 @@ def main():
     parser.add_argument("--rollout", required=True)
     parser.add_argument("--container", required=True)
     parser.add_argument("--apply", action="store_true", help="Update the Rollout image. The default previews the change.")
+    parser.add_argument("--observe", type=int, metavar="SECONDS", help="Wait for and record promotion or abort")
     args = parser.parse_args()
     if not DELIVERY_ID.fullmatch(args.run_id) or any(
         len(value) > 253 or not RESOURCE_NAME.fullmatch(value)
         for value in (args.rollout, args.namespace, args.container)
     ):
         parser.error("Invalid run ID or Kubernetes resource name")
+    if args.observe is not None and not 1 <= args.observe <= 3600:
+        parser.error("--observe must be between 1 and 3600 seconds")
     base = urlsplit(args.api_url)
     local = base.hostname in LOOPBACK or base.hostname == "::1"
     if (not base.hostname or base.username is not None or base.password is not None
@@ -70,35 +112,50 @@ def main():
 
     resource = f"rollouts.argoproj.io/{args.rollout}"
     kubectl = ["kubectl", f"--context={args.context}", f"--namespace={args.namespace}", "--request-timeout=10s"]
+    def get(*target):
+        return json.loads(subprocess.check_output([*kubectl, "get", *target, "-o", "json"], timeout=20))
+
+    approval_url = f"{args.api_url.rstrip('/')}/v1/runs/{args.run_id}"
+    observation = None
     try:
-        rollout = json.loads(subprocess.check_output([*kubectl, "get", resource, "-o", "json"], timeout=20))
+        rollout = get(resource)
         with httpx.Client(timeout=5, follow_redirects=False, trust_env=False) as client:
+            headers = {"Authorization": f"Bearer {token}", "Cache-Control": "no-cache"}
             response = client.get(
-                f"{args.api_url.rstrip('/')}/v1/runs/{args.run_id}/promotion",
-                headers={"Authorization": f"Bearer {token}", "Cache-Control": "no-cache"},
+                f"{approval_url}/promotion", headers=headers,
             )
             response.raise_for_status()
             promotion = PromotionDetail.model_validate_json(response.content)
-        if promotion.run_id != args.run_id:
-            raise ValueError("The promotion response identifies a different run")
-        image, patch = rollout_patch(rollout, args.container, promotion)
-        state = "already_configured"
-        if patch:
-            state = "preview"
-            if args.apply:
-                subprocess.run([*kubectl, "patch", resource, "--type=json",
-                                "--patch", json.dumps(patch, separators=(",", ":"))],
-                               check=True, timeout=20, stdout=subprocess.DEVNULL)
+            if promotion.run_id != args.run_id:
+                raise ValueError("The promotion response identifies a different run")
+            image, patch = rollout_patch(rollout, args.container, promotion)
+            state = "preview" if patch else "already_configured"
+            if args.observe is not None and patch and not args.apply:
+                raise ValueError("The candidate is not configured. Use --apply to start the canary.")
+            if patch and args.apply:
+                rollout = json.loads(subprocess.check_output(
+                    [*kubectl, "patch", resource, "--type=json",
+                     "--patch", json.dumps(patch, separators=(",", ":")), "-o", "json"], timeout=20,
+                ))
                 state = "submitted"
+            if args.observe is not None:
+                recorded = observe_rollout(get, resource, rollout["metadata"], args.container, image, promotion, args.observe)
+                saved = client.post(f"{approval_url}/deployments", headers=headers, json=recorded.model_dump(mode="json"))
+                saved.raise_for_status()
+                observation = saved.json()
     except httpx.HTTPStatusError as error:
-        parser.exit(1, f"Promotion authorization failed with HTTP {error.response.status_code}.\n")
+        action = "Recording the rollout" if error.request.method == "POST" else "Promotion authorization"
+        parser.exit(1, f"{action} failed with HTTP {error.response.status_code}.\n")
     except (httpx.RequestError, ValidationError, json.JSONDecodeError, KeyError, TypeError):
         parser.exit(1, "Could not read a valid promotion response or Rollout.\n")
     except (OSError, subprocess.SubprocessError):
         parser.exit(1, "kubectl could not read or update the Rollout.\n")
     except ValueError as error:
         parser.exit(1, f"{error}\n")
-    print(json.dumps({"run_id": promotion.run_id, "image": image, "state": state}))
+    result = {"run_id": promotion.run_id, "image": image, "state": state}
+    if observation is not None:
+        result["deployment"] = observation
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":

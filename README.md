@@ -42,6 +42,8 @@ The stable build answers all five demo questions correctly. The candidate answer
 
 FastAPI verifies signed deliveries and persists work in PostgreSQL. A background worker evaluates both versions and applies the release policy. Next.js renders the evidence and approval UI. LangGraph runs the bounded investigation, and the GitHub publisher reports the verdict on the evaluated commit. An operator submits the approved digest to Argo Rollouts for canary analysis.
 
+The release page shows the latest observed promotion or abort beside the saved approval, including the digest of the stable revision. [Record a rollout observation](docs/OPERATIONS.md#submit-an-approved-image-to-argo-rollouts)
+
 [System architecture and delivery flow](docs/ARCHITECTURE.md)
 
 </details>

@@ -10,6 +10,6 @@ Use a compact engineering dashboard with neutral surfaces, readable typography, 
 | Investigation | Supported or inconclusive outcome, reason, changed setting, and observed citation |
 | Approval | Candidate digest, gate evidence, actions for the approver, and saved reviewer and timestamp |
 
-Rollout measurements currently appear in the [canary drill artifact](../README.md#verification-and-rollout-evidence). Displaying deployment state on the run page is future work.
+The release page shows the latest observed promotion or abort beside the approval, with the Rollout name and candidate and stable image digests. Timing measurements appear in the [canary drill artifact](../README.md#verification-and-rollout-evidence).
 
 Use keyboard-accessible controls and visible focus. Distinguish pending, empty, failed and inconclusive states. Keep prior evidence visible during a retry and show absent metrics explicitly.

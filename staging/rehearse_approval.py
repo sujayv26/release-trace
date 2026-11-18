@@ -48,8 +48,8 @@ def stop(process):
             process.wait(timeout=5)
 
 
-def execute(*command, **kwargs):
-    return subprocess.check_output(command, text=True, timeout=30, **kwargs).strip()
+def execute(*command, timeout=30, **kwargs):
+    return subprocess.check_output(command, text=True, timeout=timeout, **kwargs).strip()
 
 
 def main():
@@ -156,11 +156,15 @@ def main():
         submission = json.loads(execute(
             sys.executable, "-m", "staging.promote_approved", run_id,
             "--context", args.context, "--namespace", args.namespace,
-            "--rollout", "approved-support", "--container", "support", "--apply",
-            env=environment,
+            "--rollout", "approved-support", "--container", "support", "--apply", "--observe", "120",
+            env=environment, timeout=170,
         ))
         require(submission["state"] == "submitted" and submission["image"] == args.candidate,
                 "The submitted image did not match the approved registry digest")
+        recorded = client.get(path).raise_for_status().json()["deployment"]
+        require(recorded == submission["deployment"] and recorded["outcome"] == "promoted"
+                and recorded["stable_image_digest"] == candidate_digest,
+                "The run did not expose the saved rollout outcome to the viewer")
         stable_hash = wait("the approved image to become stable", lambda: stable_status(args.candidate))
         require(stable_hash != baseline_hash, "The approved image did not create a new stable revision")
         analyses = get("analysisruns")["items"]
@@ -195,6 +199,7 @@ with urlopen(request, timeout=3) as response:
             "baseline_hash": baseline_hash, "stable_hash": stable_hash,
             "stable_pod_image_ids": image_ids, "successful_analysis_runs": successful,
             "stable_service_citation": "account-closure-v2",
+            "recorded_rollout": recorded,
         }, indent=2))
 
 

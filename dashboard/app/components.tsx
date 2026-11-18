@@ -1,4 +1,6 @@
-const labels: Record<string, string> = { block: 'Blocked', fail: 'Failed', pass: 'Passed' };
+const labels: Record<string, string> = {
+  block: 'Blocked', fail: 'Failed', pass: 'Passed', promoted: 'Promoted', aborted: 'Aborted',
+};
 
 export function Status({ value }: { value: string | null }) {
   const status = value ?? 'pending';

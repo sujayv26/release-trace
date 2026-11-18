@@ -113,9 +113,19 @@ class PipelineTest(unittest.TestCase):
                         self.assertEqual(process_one(engine), "build-passing")
                     passing_run = "/v1/runs/build-passing"
                     promotion_path = f"{passing_run}/promotion"
+                    deployments_path = f"{passing_run}/deployments"
+                    observation = {
+                        "rollout_uid": "fc2fe7eb-32c0-4e65-ace8-058dd667be58",
+                        "generation": 2, "namespace": "demo", "rollout": "support",
+                        "outcome": "aborted", "image_digest": pinned.candidate.build.image_digest,
+                        "stable_image_digest": pinned.baseline.build.image_digest,
+                    }
                     self.assertEqual(client.get(promotion_path, headers=auth).status_code, 403)
                     pending = client.get(promotion_path, headers=approver)
                     self.assertEqual((pending.status_code, pending.json()["code"]), (409, "approval_required"))
+                    pending_deployment = client.post(deployments_path, headers=approver, json=observation)
+                    self.assertEqual((pending_deployment.status_code, pending_deployment.json()["code"]),
+                                     (409, "approval_required"))
                     self.assertTrue(client.get(passing_run, headers=approver).json()["can_record_decision"])
                     self.assertFalse(client.get(passing_run, headers=auth).json()["can_record_decision"])
                     saved = client.post(endpoint, headers=approver, json=approval)
@@ -123,6 +133,7 @@ class PipelineTest(unittest.TestCase):
                     self.assertEqual(saved.json()["actor"], "release-reviewer")
                     reviewed = client.get(passing_run, headers=auth).json()
                     self.assertEqual(reviewed["approval"], saved.json())
+                    self.assertIsNone(reviewed["deployment"])
                     self.assertFalse(reviewed["can_record_decision"])
                     self.assertEqual(client.post(endpoint, headers=approver, json=approval).json(), saved.json())
                     authorized = client.get(promotion_path, headers=approver)
@@ -130,9 +141,11 @@ class PipelineTest(unittest.TestCase):
                     self.assertEqual(authorized.headers["Cache-Control"], "no-store")
                     promotion = PromotionDetail.model_validate(authorized.json())
                     self.assertEqual((promotion.baseline, promotion.candidate), (pinned.baseline.build, pinned.candidate.build))
-                    container = {"name": "app", "image": f"registry.example/app@{promotion.baseline.image_digest}"}
+                    baseline_image = f"registry.example/app@{promotion.baseline.image_digest}"
+                    container = {"name": "app", "image": baseline_image}
                     rollout = {
-                        "metadata": {"resourceVersion": "17"},
+                        "metadata": {"resourceVersion": "17", "uid": observation["rollout_uid"],
+                                     "generation": 1, "namespace": "demo", "name": "support"},
                         "spec": {"strategy": {"canary": {}}, "template": {"spec": {"containers": [container]}}},
                         "status": {"phase": "Healthy", "stableRS": "baseline", "currentPodHash": "baseline"},
                     }
@@ -147,23 +160,55 @@ class PipelineTest(unittest.TestCase):
                         "--namespace", "demo", "--rollout", "support", "--container", "app",
                     ]
                     command_output = StringIO()
+
+                    aborted = {
+                        "metadata": {**rollout["metadata"], "generation": 2},
+                        "spec": {**rollout["spec"], "template": {"spec": {"containers": [{"name": "app", "image": image}]}}},
+                        "status": {"observedGeneration": "2", "abort": True,
+                                   "stableRS": "baseline", "currentPodHash": "candidate"},
+                    }
+                    stable_replicaset = {
+                        "metadata": {"ownerReferences": [{"uid": observation["rollout_uid"], "controller": True}]},
+                        "status": {"availableReplicas": 1},
+                        "spec": {"template": {"spec": {"containers": [{"name": "app", "image": baseline_image}]}}},
+                    }
+
+                    patched = False
+
+                    def execute_kubectl(command, **kwargs):
+                        nonlocal patched
+                        if "patch" in command:
+                            patched = True
+                            return json.dumps(aborted)
+                        if "replicasets" in command:
+                            return json.dumps({"items": [stable_replicaset]})
+                        return json.dumps(aborted if patched else rollout)
+
                     with (
                         patch("staging.promote_approved.httpx.Client", side_effect=lambda **_: nullcontext(client)),
-                        patch("staging.promote_approved.subprocess.check_output", return_value=json.dumps(rollout)),
-                        patch("staging.promote_approved.subprocess.run") as apply_patch,
+                        patch("staging.promote_approved.subprocess.check_output", side_effect=execute_kubectl) as kubectl,
                         patch("sys.argv", argv),
                         redirect_stdout(command_output),
                     ):
                         promote_approved.main()
-                        apply_patch.assert_not_called()
+                        self.assertEqual(kubectl.call_count, 1)
                         self.assertEqual(json.loads(command_output.getvalue())["state"], "preview")
                         command_output.truncate(0)
                         command_output.seek(0)
-                        argv.append("--apply")
+                        argv.extend(("--apply", "--observe", "5"))
                         promote_approved.main()
-                        apply_patch.assert_called_once()
-                        self.assertEqual(json.loads(apply_patch.call_args.args[0][-1]), changes)
-                        self.assertEqual(json.loads(command_output.getvalue())["state"], "submitted")
+                        patch_commands = [call.args[0] for call in kubectl.call_args_list if "patch" in call.args[0]]
+                        self.assertEqual(len(patch_commands), 1)
+                        self.assertEqual(json.loads(patch_commands[0][patch_commands[0].index("--patch") + 1]), changes)
+                        completed = json.loads(command_output.getvalue())
+                        self.assertEqual(completed["state"], "submitted")
+                        self.assertEqual(completed["deployment"]["outcome"], "aborted")
+                    self.assertEqual(client.post(deployments_path, headers=auth, json=observation).status_code, 403)
+                    retry = client.post(deployments_path, headers=approver, json=observation).raise_for_status()
+                    self.assertEqual(retry.json(), completed["deployment"])
+                    bad = client.post(deployments_path, headers=approver, json={**observation, "stable_image_digest": approval["image_digest"]})
+                    self.assertEqual((bad.status_code, bad.json()["code"]), (409, "deployment_digest_mismatch"))
+                    self.assertEqual(client.get(passing_run, headers=auth).json()["deployment"], completed["deployment"])
                     container["image"] = image
                     self.assertEqual(promote_approved.rollout_patch(rollout, "app", promotion), (image, []))
                     container["image"] = "registry.example/app@sha256:" + "0" * 64
@@ -183,6 +228,8 @@ class PipelineTest(unittest.TestCase):
                             stale_promotion = restarted.get(promotion_path, headers=approver)
                             self.assertEqual((stale_promotion.status_code, stale_promotion.json()["code"]),
                                              (409, "stale_candidate"))
+                            self.assertEqual(restarted.get(passing_run, headers=auth).json()["deployment"],
+                                             completed["deployment"])
 
     def test_signed_delivery_produces_one_scoped_report(self):
         with tempfile.TemporaryDirectory() as directory, ExitStack() as cleanup:

@@ -45,7 +45,7 @@ flowchart TB
 4. The Investigator reads a saved fixture evaluation, runs up to one allowlisted experiment, and records its diagnosis independently of the release verdict.
 5. The API records reviewer decisions bound to the candidate digest. The Argo kind drill separately measures promotion, abort, and stable-service response.
 
-For an approved GitHub build, the staging command reads the current authorization from the API and submits the exact digest to a named Argo Rollout. Kubernetes credentials stay with the operator. Argo controls canary analysis and aborts. The [operations guide](OPERATIONS.md#submit-an-approved-image-to-argo-rollouts) covers preview and submission.
+For an approved GitHub build, the staging command reads the current authorization from the API and submits the exact digest to a named Argo Rollout. Kubernetes credentials stay with the operator. Argo controls canary analysis and aborts. With observation enabled, the command reads the controller's outcome and the available stable ReplicaSet, then records the evidence for display on the release page. The [operations guide](OPERATIONS.md#submit-an-approved-image-to-argo-rollouts) covers preview, submission, and observation.
 
 <details>
 <summary>Trace a signed push and a retried evaluation</summary>
