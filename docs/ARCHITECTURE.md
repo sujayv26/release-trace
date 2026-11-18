@@ -80,4 +80,4 @@ See the [Temporal recovery drill](OPERATIONS.md#run-evaluations-with-temporal) f
 
 </details>
 
-The [implementation plan](IMPLEMENTATION_PLAN.md) tracks live GitHub verification and the connected staging run. See the [operations guide](OPERATIONS.md) for configuration.
+CI has rehearsed the connected path from a locally signed delivery through evaluation and approval to a running Argo canary using real registry digests. See the [operations guide](OPERATIONS.md#rehearse-the-complete-path-in-ci) for the evidence and the [implementation plan](IMPLEMENTATION_PLAN.md) for live GitHub verification.

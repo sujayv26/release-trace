@@ -76,10 +76,11 @@ Stop the base stack with `docker compose down`. If you enabled approvals, use `d
 ## Verification and rollout evidence
 
 - **Release review.** CI passed the signed webhook and duplicate-delivery checks, blocked release, controlled rerun, passing evaluation, and protected approval. It also passed PostgreSQL integration, dashboard build, and the Temporal worker-replacement test. [ReleaseTrace CI](https://github.com/sujayv26/release-trace/actions/runs/44294539695)
+- **Approved image rollout.** CI evaluated two real registry images, approved the candidate digest, submitted it to Argo, and verified that both stable Pods ran that digest. The stable Service returned the current account-closure citation after promotion. [Approval-to-rollout rehearsal and evidence](https://github.com/sujayv26/release-trace/actions/runs/44301532495)
 - **Canary drill.** In one isolated kind run, Argo promoted the healthy revision in **6.69 s**. It detected HTTP 503 from the unhealthy canary in **5.30 s** and verified the stable service **0.22 s** after detection. The workflow publishes the JSON evidence as an artifact. [Canary run and artifact](https://github.com/sujayv26/release-trace/actions/runs/44293631233)
 - **Investigator holdout.** Both offline methods diagnosed three of four diagnosable cases. The rule made one incorrect diagnosis across six cases. The scripted Investigator made zero and used four controlled reruns. [Benchmark and error analysis](docs/ReleaseTrace-Agent-Build-Guide.md#5-benchmark-the-contribution)
 
-The approval walkthrough uses synthetic build identities. For real build evaluations, the [Argo submission command](docs/OPERATIONS.md#submit-an-approved-image-to-argo-rollouts) checks the current saved approval and uses its exact image digest. A live GitHub-to-Argo run and hosted model measurements are open milestones.
+The Compose walkthrough uses synthetic build identities. The [Argo rehearsal](docs/OPERATIONS.md#rehearse-the-complete-path-in-ci) uses real OCI digests and a locally signed delivery. Live GitHub App delivery and hosted model measurements remain open.
 
 See the [system design and delivery lifecycle](docs/ARCHITECTURE.md) for the service boundaries, or expand the [canary decision flow](docs/OPERATIONS.md#run-the-staging-canary-drill) to see what the drill checks.
 

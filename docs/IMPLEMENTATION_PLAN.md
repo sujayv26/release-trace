@@ -7,6 +7,6 @@
 | 3 · Connect review | Signed intake, Postgres-backed evaluation, dashboard, and GitHub Check preview and publishing paths. | Verify live GitHub App delivery, redelivery, and the Check on the evaluated commit. |
 | 4 · Investigate | Bounded LangGraph reruns and a six-case offline holdout. The hosted benchmark adapter is available. | Collect and analyze live model results. |
 | 5 · Recover and approve | Linux CI verified Temporal worker replacement. Compose verified digest binding, authorization, and retry. Pipeline tests cover stale candidates. | |
-| 6 · Stage a rollout | A kind drill observed healthy promotion and automatic canary abort. A staging command checks the live approval and submits the exact candidate digest to Argo. | Exercise the connected GitHub-to-Argo path with real evaluation images. |
+| 6 · Stage a rollout | A kind drill observed healthy promotion and automatic canary abort. A connected rehearsal verified the same OCI digest in evaluation, approval, Argo submission, and both stable Pods. | Run against a live GitHub App delivery and publish the Check on the evaluated commit. |
 
 Start with the [local demo](../README.md#run-the-local-demo). The [operations guide](OPERATIONS.md) covers live verification and optional workers. The [product requirements](PRD.md) describe the intended release workflow.
