@@ -10,17 +10,14 @@ from urllib.request import Request, urlopen
 from .evaluate_builds import BuildTargets
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--targets", type=Path, help="Use the candidate SHA from the local build target file")
-    args = parser.parse_args()
+def queue_demo(targets_path=None):
     repo = int(os.environ["RELEASETRACE_REPOSITORY_ID"])
     installation = int(os.environ["RELEASETRACE_INSTALLATION_ID"])
     secret = os.environ["RELEASETRACE_WEBHOOK_SECRET"].encode()
     sha = "1" * 40
     delivery_id = f"demo-{repo}-{installation}"
-    if args.targets:
-        targets = BuildTargets.model_validate_json(args.targets.read_bytes())
+    if targets_path:
+        targets = BuildTargets.model_validate_json(targets_path.read_bytes())
         sha = targets.candidate.build.commit_sha
         delivery_id += f"-build-{sha}"
     body = json.dumps({
@@ -37,7 +34,16 @@ def main():
         "X-Hub-Signature-256": "sha256=" + hmac.digest(secret, body, "sha256").hex(),
     })
     with urlopen(request, timeout=5) as response:
-        print(response.read().decode())
+        if response.status != 202:
+            raise RuntimeError(f"Expected webhook HTTP 202, received {response.status}")
+        return json.load(response)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--targets", type=Path, help="Use the candidate SHA from the local build target file")
+    args = parser.parse_args()
+    print(json.dumps(queue_demo(args.targets)))
 
 
 if __name__ == "__main__":

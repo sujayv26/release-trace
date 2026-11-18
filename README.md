@@ -2,6 +2,37 @@
 
 ReleaseTrace is an AI release verification project in development. It compares stable and candidate versions and investigates failed cases through controlled reruns.
 
+## Run the full demo in Docker Compose
+
+From the repository root, run these commands with Docker and Compose v2:
+
+```bash
+docker compose up --build --wait --wait-timeout 90
+docker compose exec -T api python -m service.seed_demo
+```
+
+Compose starts PostgreSQL, runs the one-shot `migrate` service, then starts
+the API, worker, and dashboard. The seed command sends a signed synthetic push.
+Repeating it returns the same delivery ID. To apply pending migrations
+explicitly, run `docker compose run --rm --build migrate`.
+
+Open [the dashboard](http://localhost:3000) with `demo-maintainer-token`, open
+the blocked run, and select **Investigate** on the failed account-closure case.
+Refresh the report once the worker has finished. `demo-viewer-token` gives
+read-only access. These defaults are for the local demo. The API and dashboard
+bind to loopback, and PostgreSQL is reachable on the Compose network. To
+change the host ports, set `RELEASETRACE_API_PORT` or `RELEASETRACE_DASHBOARD_PORT`.
+
+Run `docker compose exec -T api python -m service.smoke_demo` to check the
+signed event, duplicate delivery, blocked release, and successful controlled
+rerun. GitHub Actions runs the same smoke against a fresh stack. Use
+`docker compose down` to stop the stack. The named volume retains saved runs.
+
+The Compose build uses digest-pinned base images, the dashboard's npm lockfile,
+and `service/requirements.compose.lock`. To refresh the Python lock after a
+dependency change, run `uv pip compile service/requirements.txt --universal
+--python-version 3.12 --no-header --output-file service/requirements.compose.lock`.
+
 ## Run the first milestone locally
 
 Requires Python 3.10 or later. The demo runs without external dependencies or credentials.
@@ -171,6 +202,26 @@ checks for the configured repository, records the Check ID, and retries
 temporary failures. Earlier completed build deliveries are also eligible.
 Seeded demo deliveries and synthetic fixtures are preview-only in this worker.
 Use the automated publisher or the manual publishing command for a delivery.
+
+### Verify live GitHub App redelivery
+
+Use a demo repository you control and an HTTPS endpoint that routes GitHub to
+`/webhooks/github`. Configure the App for push events with repository
+**Contents: read** and **Checks: write**, install it on that repository, and
+configure the API webhook secret and worker key on the host. Deploy the two
+evaluation targets with the real build identities. Set the candidate SHA in
+the target file before delivering the push. The local Compose demo uses test
+IDs and credentials. [GitHub push event permissions](https://docs.github.com/en/webhooks/webhook-events-and-payloads#push)
+
+1. Record the push delivery GUID and candidate SHA. Read
+   `GET /v1/runs/{delivery_id}` and wait for `github_check_id`. The saved run's
+   `commit_sha` and GitHub Check's `head_sha` should both match the candidate SHA.
+   The Check's `external_id` should equal the delivery GUID.
+2. Redeliver that same push from the GitHub App's **Recent deliveries**. The API
+   should return HTTP 202 with `status: duplicate`. Confirm the saved run keeps
+   its original Check ID. List the Check runs for that exact SHA and confirm
+   there is exactly one from the App with that name and delivery GUID.
+   [GitHub App redelivery](https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/redelivering-webhooks#redelivering-github-app-webhooks) · [Check Runs API](https://docs.github.com/en/rest/checks/runs#list-check-runs-for-a-git-reference)
 
 ## Investigate a failed synthetic case
 

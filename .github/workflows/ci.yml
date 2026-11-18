@@ -68,3 +68,23 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - run: npm ci
       - run: npm run build
+  compose:
+    name: Compose smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start stack and apply migrations
+        run: docker compose up --build --wait --wait-timeout 90
+      - name: Verify dashboard, signed fixture, and investigation
+        run: |
+          curl --fail --silent --show-error http://127.0.0.1:3000/ | grep -F 'Open release history' >/dev/null
+          docker compose exec -T api python -m service.smoke_demo
+      - name: Print stack diagnostics
+        if: failure()
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color
+      - name: Tear down CI stack
+        if: always()
+        run: docker compose down --volumes
