@@ -256,6 +256,27 @@ coordinate target configuration changes with staging submissions.
 `submitted` means Kubernetes accepted the patch. Observe the Rollout and its
 AnalysisRuns to confirm the outcome.
 
+### Rehearse the complete path in CI
+
+Run **ReleaseTrace canary drill** from the Actions tab. The workflow builds
+two support application images from the checked-out commit and pushes them to
+a registry on the disposable runner. The rehearsal starts both images by
+their manifest digests and sends a locally signed GitHub-shaped push through
+the normal API and worker. It verifies deduplication and a passing gate,
+checks that promotion requires approval, and records approval for the
+evaluated digest.
+
+The staging command submits that digest to Argo in kind. The inline analysis
+checks the canary's reported identity and account-closure citation. The
+rehearsal then checks the running Pods' image IDs and calls the stable
+Service. Download `approved-rollout-evidence.json` from the
+`approved-rollout-evidence` artifact to compare the approved digest,
+submitted reference, stable Pod identities, and successful AnalysisRun.
+
+The rehearsal uses synthetic policy cases and a locally generated delivery.
+Live GitHub App delivery and Check publishing use the
+[live redelivery checklist](#verify-live-github-app-redelivery).
+
 ## Run the staging canary drill
 
 The canary workflow creates a disposable kind cluster and runs Argo Rollouts

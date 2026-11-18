@@ -24,6 +24,8 @@ jobs:
         with:
           cluster_name: releasetrace
           version: v0.27.0
+          registry: true
+          registry_port: 5001
       - name: Install Argo Rollouts
         run: |
           kubectl create namespace argo-rollouts
@@ -41,19 +43,15 @@ jobs:
           path: rollout-evidence.json
       - name: Build and register evaluation images
         run: |
-          docker run -d --network kind --name release-registry -p 127.0.0.1:5001:5000 registry:3
-          for node in $(kind get nodes --name releasetrace); do
-            config_dir=/etc/containerd/certs.d/localhost:5001
-            docker exec "$node" mkdir -p "$config_dir"
-            printf '[host."http://release-registry:5000"]\n' |
-              docker exec -i "$node" cp /dev/stdin "$config_dir/hosts.toml"
-          done
           docker build -t releasetrace-service:local -f service/Dockerfile .
           for variant in baseline candidate; do
             tag="localhost:5001/support:$variant"
             docker build --provenance=false --build-arg "VARIANT=$variant" -t "$tag" -f staging/BuildTarget.Dockerfile .
             docker push "$tag"
             ref="$(docker image inspect --format '{{index .RepoDigests 0}}' "$tag")"
+            for node in $(kind get nodes --name releasetrace); do
+              docker exec "$node" crictl pull "$ref"
+            done
             printf 'RELEASETRACE_%s_IMAGE=%s\n' "${variant^^}" "$ref" >> "$GITHUB_ENV"
           done
       - name: Evaluate, approve, and promote the same OCI image
