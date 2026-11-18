@@ -12,6 +12,18 @@ flowchart TB
     Gate -->|Passing corrected build| Review["Approver reviews the digest"]
     Block --> Rerun["Run a controlled experiment"]
     Review --> Decision["Save a digest-bound decision"]
+
+    classDef process fill:#dbeafe,stroke:#2563eb,color:#172554,stroke-width:1.5px
+    classDef decision fill:#fef3c7,stroke:#b45309,color:#451a03,stroke-width:1.5px
+    classDef blocked fill:#ffe4e6,stroke:#be123c,color:#4c0519,stroke-width:1.5px
+    classDef investigation fill:#ede9fe,stroke:#7c3aed,color:#2e1065,stroke-width:1.5px
+    classDef success fill:#dcfce7,stroke:#15803d,color:#052e16,stroke-width:1.5px
+
+    class Push,Evaluate process
+    class Gate decision
+    class Block blocked
+    class Rerun investigation
+    class Review,Decision success
 ```
 
 <details>

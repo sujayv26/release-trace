@@ -25,6 +25,16 @@ flowchart TB
     Rerun --> Score{"Stable and rerun both pass?"}
     Score -->|Yes| Supported["Save a supported diagnosis"]
     Score -->|No| Abstain
+
+    classDef evidence fill:#e2e8f0,stroke:#64748b,color:#0f172a,stroke-width:1.5px
+    classDef decision fill:#fef3c7,stroke:#b45309,color:#451a03,stroke-width:1.5px
+    classDef investigation fill:#ede9fe,stroke:#7c3aed,color:#2e1065,stroke-width:1.5px
+    classDef success fill:#dcfce7,stroke:#15803d,color:#052e16,stroke-width:1.5px
+
+    class Evidence evidence
+    class Planner,Score,Abstain decision
+    class Rerun investigation
+    class Supported success
 ```
 
 ### Planned connected workflow
@@ -72,12 +82,22 @@ For the proposed multi-experiment workflow, expose tool timeouts and missing dat
 
 ```mermaid
 flowchart TD
+    accTitle: Proposed multi-experiment investigation
+    accDescr: The Investigator inspects evidence and runs justified experiments until it can write a report or reaches its budget.
     I["Load case and provenance"] --> E["Inspect trace and config evidence"]
     E --> D{"Experiment justified?"}
     D -->|Yes| R["Validate and run intervention"]
     R --> U["Score result and update evidence"]
     U --> D
     D -->|Stop or budget reached| F["Write typed diagnosis"]
+
+    classDef evidence fill:#e2e8f0,stroke:#64748b,color:#0f172a,stroke-width:1.5px
+    classDef decision fill:#fef3c7,stroke:#b45309,color:#451a03,stroke-width:1.5px
+    classDef investigation fill:#ede9fe,stroke:#7c3aed,color:#2e1065,stroke-width:1.5px
+
+    class I,E,F evidence
+    class D decision
+    class R,U investigation
 ```
 
 | Tool | Behavior |

@@ -25,6 +25,18 @@ flowchart TB
     subgraph Staging["Independent staging drill"]
         Argo["Argo Rollouts in kind"] --> Evidence["Promotion and abort evidence"]
     end
+
+    classDef process fill:#dbeafe,stroke:#2563eb,color:#172554,stroke-width:1.5px
+    classDef decision fill:#fef3c7,stroke:#b45309,color:#451a03,stroke-width:1.5px
+    classDef investigation fill:#ede9fe,stroke:#7c3aed,color:#2e1065,stroke-width:1.5px
+    classDef evidence fill:#e2e8f0,stroke:#64748b,color:#0f172a,stroke-width:1.5px
+    classDef success fill:#dcfce7,stroke:#15803d,color:#052e16,stroke-width:1.5px
+
+    class Push,Dashboard,API,Worker,Publisher,GitHub process
+    class Gate decision
+    class Investigator investigation
+    class DB,Evidence evidence
+    class Argo success
 ```
 
 1. The API verifies the signature and project scope, deduplicates by delivery ID, and persists the queued inputs. Build mode snapshots the configured endpoints. Fixture mode records the push SHA as event provenance.
@@ -44,17 +56,21 @@ sequenceDiagram
     participant A as API
     participant D as Database
     participant W as Evaluation worker
-    G->>A: Push with delivery ID and signature
-    A->>D: Insert scoped delivery and pinned inputs
+    rect rgba(59, 130, 246, 0.12)
+        G->>A: Push with delivery ID and signature
+        A->>D: Insert scoped delivery and pinned inputs
+    end
     alt First delivery
         A-->>G: 202 queued
         W->>D: Claim delivery and save gate report
     else Redelivery
         A-->>G: 202 duplicate
     end
-    opt Activity retried after commit
-        W->>D: Check delivery state
-        D-->>W: Completed result already exists
+    rect rgba(22, 163, 74, 0.12)
+        opt Activity retried after commit
+            W->>D: Check delivery state
+            D-->>W: Completed result already exists
+        end
     end
 ```
 

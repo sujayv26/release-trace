@@ -256,6 +256,18 @@ flowchart TB
     Abort --> Prior["Verify the stable Service still serves the healthy revision"]
     New --> Evidence["Record rollout evidence"]
     Prior --> Evidence
+
+    classDef process fill:#dbeafe,stroke:#2563eb,color:#172554,stroke-width:1.5px
+    classDef decision fill:#fef3c7,stroke:#b45309,color:#451a03,stroke-width:1.5px
+    classDef success fill:#dcfce7,stroke:#15803d,color:#052e16,stroke-width:1.5px
+    classDef blocked fill:#ffe4e6,stroke:#be123c,color:#4c0519,stroke-width:1.5px
+    classDef evidence fill:#e2e8f0,stroke:#64748b,color:#0f172a,stroke-width:1.5px
+
+    class Canary process
+    class Probe decision
+    class Promote,New success
+    class Abort blocked
+    class Prior,Evidence evidence
 ```
 
 </details>
