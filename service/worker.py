@@ -4,12 +4,13 @@ import argparse
 import time
 from contextlib import ExitStack
 
+from .investigator import process_investigation
 from .store import database, process_one
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--once", action="store_true", help="Process at most one delivery")
+    parser.add_argument("--once", action="store_true", help="Run one pass through the queues")
     parser.add_argument("--publish-checks", action="store_true", help="Publish completed build checks to GitHub")
     args = parser.parse_args()
     engine = database()
@@ -26,10 +27,11 @@ def main():
             client = stack.enter_context(github_client())
         while True:
             processed = process_one(engine)
+            investigated = process_investigation(engine)
             published = app is not None and publish_one(engine, app, client)
             if args.once:
                 return
-            if processed is None and not published:
+            if processed is None and investigated is None and not published:
                 time.sleep(1)
 
 

@@ -14,13 +14,14 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, StrictInt, ValidationError
+from pydantic import BaseModel, Field, StrictInt, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
 from .evaluate_builds import BuildTargets
-from .store import database, deliveries, enqueue
+from .investigator import enqueue_investigation
+from .store import database, deliveries, enqueue, investigations
 
 MAX_BODY = 1024 * 1024
 DELIVERY_ID = re.compile(r"[A-Za-z0-9-]{1,128}")
@@ -98,6 +99,37 @@ class CasePage(BaseModel):
     next_cursor: str | None
 
 
+class InvestigationRequest(BaseModel):
+    case_id: Annotated[str, Field(min_length=1, max_length=128)]
+
+
+class QueuedInvestigation(BaseModel):
+    investigation_id: str
+
+
+class RetrievalExperiment(CaseVariant):
+    experiment_id: str
+    intervention: Literal["restore_retrieval"]
+
+
+class InvestigationReport(BaseModel):
+    outcome: Literal["supported", "inconclusive"]
+    reason: str
+    required_citation: str
+    baseline: CaseVariant
+    candidate: CaseVariant
+    experiment: RetrievalExperiment | None
+    changed_parameter: dict[str, str] | None = None
+    dataset_digest: str
+    policy_digest: str
+
+
+class InvestigationDetail(QueuedInvestigation):
+    case_id: str
+    state: str
+    report: InvestigationReport | None
+
+
 class ReadError(Exception):
     def __init__(self, status, code, message):
         self.status = status
@@ -123,10 +155,13 @@ def as_utc(value: datetime | None) -> datetime | None:
 def create_app():
     secret = os.environ["RELEASETRACE_WEBHOOK_SECRET"].encode()
     token = os.environ["RELEASETRACE_READ_TOKEN"].encode()
+    maintainer_token = os.getenv("RELEASETRACE_MAINTAINER_TOKEN", "").encode()
     repository = int(os.environ["RELEASETRACE_REPOSITORY_ID"])
     installation = int(os.environ["RELEASETRACE_INSTALLATION_ID"])
     if not secret or not token or repository <= 0 or installation <= 0:
         raise ValueError("Webhook secret, read token and positive GitHub IDs are required")
+    if maintainer_token and hmac.compare_digest(token, maintainer_token):
+        raise ValueError("Use distinct viewer and maintainer tokens")
     engine = database()
     demo = Path(__file__).resolve().parents[1] / "demo"
     inputs = {
@@ -158,8 +193,16 @@ def create_app():
 
     def require_read(request: Request):
         provided = request.headers.get("authorization", "").encode()
+        if maintainer_token and hmac.compare_digest(provided, b"Bearer " + maintainer_token):
+            return
         if not hmac.compare_digest(provided, b"Bearer " + token):
             raise ReadError(401, "unauthorized", "A project read token is required")
+
+    def require_maintainer(request: Request):
+        require_read(request)
+        provided = request.headers.get("authorization", "").encode()
+        if not maintainer_token or not hmac.compare_digest(provided, b"Bearer " + maintainer_token):
+            raise ReadError(403, "maintainer_required", "A project maintainer token is required")
 
     def load_run(delivery_id, *columns):
         with engine.connect() as connection:
@@ -192,6 +235,7 @@ def create_app():
     def readiness():
         with engine.connect() as connection:
             connection.execute(select(deliveries.c.created_at, deliveries.c.github_check_id).limit(1))
+            connection.execute(select(investigations.c.id).limit(1))
         return {"status": "ready"}
 
     @app.post("/webhooks/github", response_model=Accepted, status_code=202)
@@ -291,5 +335,30 @@ def create_app():
             if len(items) > limit:
                 return CasePage(state=run["state"], items=items[:limit], next_cursor=items[-2].case_id)
         return CasePage(state=run["state"], items=items, next_cursor=None)
+
+    @app.post("/v1/runs/{delivery_id}/investigations", status_code=202, dependencies=[Depends(require_maintainer)])
+    def start_investigation(delivery_id: str, body: InvestigationRequest) -> QueuedInvestigation:
+        run = load_run(delivery_id, deliveries.c.state, deliveries.c.report, mode)
+        if run["evaluation_mode"] != "synthetic_fixture" or run["state"] != "completed" or run["report"] is None:
+            raise ReadError(409, "run_not_investigable", "A completed synthetic evaluation is required")
+        case = run["report"]["candidate"]["results"].get(body.case_id)
+        if case is None:
+            raise ReadError(404, "case_missing", "Case was not found")
+        if case["outcome"] != "fail":
+            raise ReadError(409, "case_not_failed", "A failed candidate case is required")
+        return QueuedInvestigation(investigation_id=enqueue_investigation(engine, delivery_id, body.case_id))
+
+    @app.get("/v1/runs/{delivery_id}/investigations/{investigation_id}", dependencies=[Depends(require_read)])
+    def read_investigation(delivery_id: str, investigation_id: str) -> InvestigationDetail:
+        with engine.connect() as connection:
+            result = connection.execute(select(
+                investigations.c.id.label("investigation_id"), investigations.c.case_id,
+                investigations.c.state, investigations.c.report,
+            ).join(deliveries, deliveries.c.id == investigations.c.run_id).where(
+                *scope, investigations.c.run_id == delivery_id, investigations.c.id == investigation_id,
+            )).mappings().one_or_none()
+        if result is None:
+            raise ReadError(404, "investigation_missing", "Investigation was not found")
+        return InvestigationDetail(**result)
 
     return app

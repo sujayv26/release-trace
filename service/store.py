@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    JSON, BigInteger, Column, DateTime, Index, MetaData, String, Table, create_engine, select, update,
+    JSON, BigInteger, Column, DateTime, ForeignKey, Index, MetaData, String, Table, create_engine, select, update,
 )
 from sqlalchemy.exc import IntegrityError
 
@@ -28,6 +28,15 @@ deliveries = Table(
     Column("github_check_id", BigInteger),
     Column("github_check_retry_at", DateTime(timezone=True)),
     Index("ix_webhook_deliveries_project_history", "repository_id", "installation_id", "id"),
+)
+investigations = Table(
+    "investigations",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("run_id", ForeignKey("webhook_deliveries.id"), nullable=False),
+    Column("case_id", String(128), nullable=False),
+    Column("state", String(16), nullable=False, index=True),
+    Column("report", JSON),
 )
 
 

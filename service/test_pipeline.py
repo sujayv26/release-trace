@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from .api import create_app
 from .evaluate_builds import FIXTURES, BuildTargets, evaluate_builds
 from .github_check import BUILD_CHECK_NAME, check_payload, completed_run
+from .investigator import process_investigation
 from .schema import upgrade_database
 from .store import database, enqueue, process_one
 
@@ -94,6 +95,7 @@ class PipelineTest(unittest.TestCase):
                 "RELEASETRACE_REPOSITORY_ID": "1",
                 "RELEASETRACE_INSTALLATION_ID": "2",
                 "RELEASETRACE_BUILD_TARGETS_FILE": "",
+                "RELEASETRACE_MAINTAINER_TOKEN": "maintainer-token",
             }):
                 engine = database()
                 cleanup.callback(engine.dispose)
@@ -142,6 +144,28 @@ class PipelineTest(unittest.TestCase):
                     self.assertEqual(result["state"], "completed")
                     self.assertEqual(result["commit_sha"], sha)
                     self.assertEqual(result["report"]["candidate"]["verdict"], "block")
+                    investigate = f"{run}/investigations"
+                    maintain = {"Authorization": "Bearer maintainer-token"}
+                    body_case = {"case_id": "account-closure"}
+                    self.assertEqual(client.post(investigate, json=body_case, headers=auth).status_code, 403)
+                    self.assertEqual(client.post(investigate, json={"case_id": "billing"}, headers=maintain).status_code, 409)
+                    queued = client.post(investigate, json=body_case, headers=maintain)
+                    self.assertEqual(queued.status_code, 202)
+                    investigation_id = queued.json()["investigation_id"]
+                    self.assertEqual(client.post(investigate, json=body_case, headers=maintain).json(), queued.json())
+                    report_url = f"{investigate}/{investigation_id}"
+                    self.assertEqual(client.get(report_url).status_code, 401)
+                    self.assertEqual(client.get(report_url, headers=auth).json()["state"], "queued")
+                    self.assertEqual(process_investigation(engine), investigation_id)
+                    self.assertIsNone(process_investigation(engine))
+                    diagnosis = client.get(report_url, headers=auth).json()["report"]
+                    self.assertEqual(diagnosis["outcome"], "supported")
+                    self.assertEqual(diagnosis["candidate"]["citation"], "account-closure-v1")
+                    self.assertEqual(diagnosis["experiment"]["citation"], "account-closure-v2")
+                    self.assertEqual(diagnosis["experiment"]["config"], {**diagnosis["candidate"]["config"], "retrieval": "newest"})
+                    self.assertEqual(client.get(run, headers=auth).json()["report"], result["report"])
+                    other = f"/v1/runs/other/investigations/{investigation_id}"
+                    self.assertEqual(client.get(other, headers=auth).status_code, 404)
                     with self.assertRaisesRegex(ValueError, "No completed evaluation"):
                         completed_run(engine, "delivery-1", 1, 3)
                     check = check_payload(completed_run(engine, "delivery-1", 1, 2))

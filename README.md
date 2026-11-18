@@ -171,3 +171,17 @@ checks for the configured repository, records the Check ID, and retries
 temporary failures. Earlier completed build deliveries are also eligible.
 Seeded demo deliveries and synthetic fixtures are preview-only in this worker.
 Use the automated publisher or the manual publishing command for a delivery.
+
+## Investigate a failed synthetic case
+
+Apply migrations with `python -m service.store` and configure a separate
+`RELEASETRACE_MAINTAINER_TOKEN` on the API. After a synthetic run completes,
+send `POST /v1/runs/{delivery_id}/investigations` with the maintainer bearer
+token and `{"case_id":"account-closure"}`. The same run and case return the
+same investigation ID on retry.
+
+The worker executes the rerun. Read it with the viewer or maintainer token at
+`GET /v1/runs/{delivery_id}/investigations/{investigation_id}`. The saved report
+shows the stable and candidate evidence, the retrieval change, and its result.
+An investigation can support a diagnosis or return inconclusive. The release
+verdict is recorded separately.
