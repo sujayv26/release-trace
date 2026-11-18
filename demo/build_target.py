@@ -25,6 +25,8 @@ def main():
     parser.add_argument("variant", choices=("baseline", "candidate"))
     parser.add_argument("--targets", type=Path, default=DIRECTORY / "build_targets.json")
     parser.add_argument("--fixed", action="store_true", help="Serve the corrected retrieval setting")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int)
     args = parser.parse_args()
     variant = args.variant
     targets = BuildTargets.model_validate_json(args.targets.read_bytes())
@@ -47,7 +49,7 @@ def main():
         result = evaluate({**case, "question": question.question}, config)
         return Answer(build=target.build, citation=result["citation"])
 
-    uvicorn.run(app, host="127.0.0.1", port=target.url.port)
+    uvicorn.run(app, host=args.host, port=target.url.port if args.port is None else args.port)
 
 
 if __name__ == "__main__":

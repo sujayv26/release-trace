@@ -4,6 +4,8 @@ on:
     branches: [develop]
     paths:
       - 'staging/**'
+      - 'service/**'
+      - 'demo/**'
       - '.github/workflows/staging.yml'
   workflow_dispatch:
 permissions:
@@ -11,7 +13,7 @@ permissions:
 jobs:
   drill:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 16
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,6 +23,7 @@ jobs:
         uses: helm/kind-action@v1.12.0
         with:
           cluster_name: releasetrace
+          version: v0.27.0
       - name: Install Argo Rollouts
         run: |
           kubectl create namespace argo-rollouts
@@ -36,8 +39,40 @@ jobs:
         with:
           name: rollout-evidence
           path: rollout-evidence.json
+      - name: Build and register evaluation images
+        run: |
+          docker run -d --network kind --name release-registry -p 127.0.0.1:5001:5000 registry:3
+          for node in $(kind get nodes --name releasetrace); do
+            config_dir=/etc/containerd/certs.d/localhost:5001
+            docker exec "$node" mkdir -p "$config_dir"
+            printf '[host."http://release-registry:5000"]\n' |
+              docker exec -i "$node" cp /dev/stdin "$config_dir/hosts.toml"
+          done
+          docker build -t releasetrace-service:local -f service/Dockerfile .
+          for variant in baseline candidate; do
+            tag="localhost:5001/support:$variant"
+            docker build --provenance=false --build-arg "VARIANT=$variant" -t "$tag" -f staging/BuildTarget.Dockerfile .
+            docker push "$tag"
+            ref="$(docker image inspect --format '{{index .RepoDigests 0}}' "$tag")"
+            printf 'RELEASETRACE_%s_IMAGE=%s\n' "${variant^^}" "$ref" >> "$GITHUB_ENV"
+          done
+      - name: Evaluate, approve, and promote the same OCI image
+        run: |
+          set -o pipefail
+          python -m pip install -r service/requirements.txt
+          kubectl create namespace approved-drill
+          python -m staging.rehearse_approval --context kind-releasetrace --namespace approved-drill \
+            --baseline "$RELEASETRACE_BASELINE_IMAGE" --candidate "$RELEASETRACE_CANDIDATE_IMAGE" \
+            --commit "$GITHUB_SHA" | tee approved-rollout-evidence.json
+      - name: Save approval-to-rollout evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: approved-rollout-evidence
+          path: approved-rollout-evidence.json
       - name: Inspect controller state on failure
         if: failure()
         run: |
           kubectl get rollouts,analysisruns,replicasets,pods,services --namespace release-drill -o yaml
+          kubectl get rollouts,analysisruns,replicasets,pods,services --namespace approved-drill -o yaml || true
+          kubectl get events --namespace approved-drill --sort-by=.lastTimestamp || true
           kubectl logs deployment/argo-rollouts --namespace argo-rollouts --tail=80
