@@ -1,7 +1,16 @@
 # ReleaseTrace
 
-ReleaseTrace is an AI release verification project in development. It compares stable and candidate versions, investigates failed cases through controlled reruns, and records evidence for staged release decisions.
+ReleaseTrace is an AI release verification project in development. It compares stable and candidate versions and investigates failed cases through controlled reruns.
 
-The first milestone is a local demo that reproduces an outdated policy citation and tests whether restoring the baseline retrieval settings fixes it.
+## Run the first milestone locally
 
-Start with the [implementation plan](docs/IMPLEMENTATION_PLAN.md) and [Codex instructions](AGENTS.md).
+Requires Python 3.10 or later. The demo runs without external dependencies or credentials.
+
+```bash
+python demo/release_trace_demo.py
+python -m unittest discover -s demo -v
+```
+
+The stable configuration cites the current account-closure policy. The candidate cites a superseded policy. Restoring only the baseline retrieval setting makes the candidate cite the current policy. The report includes configuration fingerprints and the selected source evidence.
+
+See the [implementation plan](docs/IMPLEMENTATION_PLAN.md), [architecture](docs/ARCHITECTURE.md), [investigator guide](docs/ReleaseTrace-Agent-Build-Guide.md), and [Codex instructions](AGENTS.md).
