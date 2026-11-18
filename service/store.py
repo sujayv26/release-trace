@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    JSON, BigInteger, Column, DateTime, ForeignKey, Index, MetaData, String, Table, create_engine, select, update,
+    JSON, BigInteger, Column, DateTime, ForeignKey, Index, Integer, MetaData, String, Table, create_engine, select, update,
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import make_url
@@ -84,6 +84,21 @@ project_memberships = Table(
     Column("organization", String(63), primary_key=True),
     Column("role", String(10), nullable=False),
 )
+account_access_events = Table(
+    "account_access_events",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("action", String(8), nullable=False),
+    Column("handle", String(64), nullable=False),
+    Column("operator", String(64)),
+    Column("repository_id", BigInteger),
+    Column("installation_id", BigInteger),
+    Column("organization", String(63)),
+    Column("role", String(10)),
+    Column("recorded_at", DateTime(timezone=True), nullable=False),
+    Index("ix_account_access_events_handle", "handle", "id"),
+    Index("ix_account_access_events_repository", "repository_id", "id"),
+)
 
 
 def database():
@@ -91,6 +106,15 @@ def database():
     if url.drivername in ("postgres", "postgresql"):
         url = url.set(drivername="postgresql+psycopg")
     return create_engine(url)
+
+
+def as_utc(value: datetime | None) -> datetime | None:
+    # SQLite drops offsets on storage, while PostgreSQL returns aware values.
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def enqueue(engine, delivery_id, repository, installation, sha, inputs):

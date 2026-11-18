@@ -60,6 +60,7 @@ project file unless it is absolute.
       "organization": "support-team",
       "name": "Support application",
       "github_repository": "example/support-app",
+      "attestation_workflow": "example/support-app/.github/workflows/build.yml",
       "build_targets_file": "support-builds.json",
       "evaluation_file": "support-evaluation.json"
     }
@@ -84,6 +85,19 @@ the dashboard and can switch between projects with active memberships. Grant
 `grant` again. Use `revoke HANDLE REPOSITORY_ID` to remove a membership,
 `rotate HANDLE` to replace a key, or `disable HANDLE` to invalidate it.
 An approval records the authenticated account handle.
+
+Managed access commands also append an audit record in the same database
+transaction. Set `RELEASETRACE_OPERATOR` or pass `--operator` before the
+command to record the operator's handle. The handle is supplied by the local
+operator session. Use `history` in the private operator terminal to inspect
+the newest commands. It omits key material and works against a restored
+database using the restored database URL.
+
+```bash
+python -m service.accounts --operator pilot-admin grant release-reviewer 12345 approver
+python -m service.accounts history --repository-id 12345 --limit 20
+python -m service.accounts history --handle release-reviewer
+```
 
 Install the same GitHub App on the listed repositories and configure its
 webhook secret on the API. Rotate the secret on the API when it changes in
@@ -392,6 +406,12 @@ stale build pairs, rejected or missing approvals, and seeded demo runs. The
 command uses a conditional patch with the Rollout's resource version and
 leaves the existing canary analysis and abort behavior to Argo. Run with the
 same arguments again to check whether the candidate is already configured.
+
+Set `attestation_workflow` in a managed project to require that workflow's
+provenance before the promotion command applies a change. If you pass
+`--attested-by`, it must match the project's configured signer. The command
+refreshes the authorization after verifying provenance and before submitting
+the rollout.
 
 Keep candidate configuration consistent across serving API instances and
 coordinate target configuration changes with staging submissions.

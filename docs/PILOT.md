@@ -38,7 +38,8 @@ record of the rehearsal.
    their original records. The command uses `pg_dump` and `pg_restore` to copy
    the records into `releasetrace_restored`, then starts a separate API against
    it. The returned run, case evidence, approval, and rollout must match the
-   source API exactly.
+   source API exactly. The drill also checks that the operator audit history
+   in the restored database matches the source.
 
 This drill uses a locally signed GitHub-shaped delivery and a synthetic rollout
 observation. Follow the hosted checklist for GitHub App delivery, attestation
@@ -75,9 +76,11 @@ The worker checks this configuration before making requests or attaching a beare
 ### Verify image provenance before applying a rollout
 
 Run from a staging operator environment with GitHub CLI and registry access.
-Supply the exact workflow that is trusted to sign builds for the evaluated
-repository. The command verifies the candidate's OCI digest and evaluated
-commit before the Kubernetes patch. It then waits to record the outcome.
+Set `attestation_workflow` in the managed project file to the exact workflow
+trusted to sign builds for the evaluated repository. The promotion command
+uses that setting and rejects an override to a different signer. The command
+verifies the candidate's OCI digest and evaluated commit before the Kubernetes
+patch. It then waits to record the outcome.
 
 ```bash
 python -m staging.promote_approved DELIVERY_ID \
@@ -86,8 +89,8 @@ python -m staging.promote_approved DELIVERY_ID \
   --attested-by OWNER/REPO/.github/workflows/build.yml --apply --observe 120
 ```
 
-Use `--attestation-bundle PATH` with `--attested-by` to verify a downloaded
-signed bundle. The canary workflow uses this path with its disposable
+Use `--attestation-bundle PATH` to verify a downloaded signed bundle. The
+canary workflow uses this path with its disposable
 registry. It signs the candidate digest in GitHub Actions, checks that a
 different commit and image are rejected, and saves the bundle and verified
 commit-to-digest mapping with the observed rollout.

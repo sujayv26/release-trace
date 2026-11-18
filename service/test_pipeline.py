@@ -26,19 +26,21 @@ from .store import database, enqueue, process_one
 class PipelineTest(unittest.TestCase):
     def test_managed_accounts_isolate_runs_and_roles(self):
         targets = BuildTargets.model_validate_json((FIXTURES / "passing_build_targets.json").read_bytes())
+        workflow = "example/help-desk/.github/workflows/build.yml"
         with tempfile.TemporaryDirectory() as directory, ExitStack() as cleanup:
             config = Path(directory, "projects.json")
             Path(directory, "targets.json").write_text(targets.model_dump_json(), encoding="utf-8")
             config.write_text(json.dumps({"projects": [
                 {"repository_id": 51, "installation_id": 61, "organization": "alpha-team", "name": "Support"},
                 {"repository_id": 52, "installation_id": 62, "organization": "beta-team", "name": "Help desk",
-                 "build_targets_file": "targets.json"},
+                 "build_targets_file": "targets.json", "attestation_workflow": workflow},
             ]}), encoding="utf-8")
             db_path = Path(directory, "accounts.db").as_posix()
             with patch.dict(os.environ, {
                 "RELEASETRACE_DATABASE_URL": os.getenv("RELEASETRACE_TEST_DATABASE_URL", f"sqlite:///{db_path}"),
                 "RELEASETRACE_PROJECTS_FILE": str(config),
                 "RELEASETRACE_WEBHOOK_SECRET": "managed-test-secret",
+                "RELEASETRACE_OPERATOR": "test-operator",
                 "RELEASETRACE_READ_TOKEN": "legacy-viewer",
                 "RELEASETRACE_CANDIDATE_EVALUATION_TOKEN": "legacy-token",
                 "RELEASETRACE_CANDIDATE_EVALUATION_TOKEN_51": "another-project-token",
@@ -122,7 +124,34 @@ class PipelineTest(unittest.TestCase):
                     self.assertEqual(client.post(f"{beta}/approval", headers=alice, json=decision).status_code, 403)
                     approved = client.post(f"{beta}/approval", headers=bob, json=decision).raise_for_status().json()
                     self.assertEqual(approved["actor"], "beta-approver")
-                    self.assertEqual(client.get(f"{beta}/promotion", headers=bob).status_code, 200)
+                    promotion = client.get(f"{beta}/promotion", headers=bob).raise_for_status().json()
+                    self.assertEqual(promotion["attestation_workflow"], workflow)
+                    baseline_image = f"registry.example/help-desk@{targets.baseline.build.image_digest}"
+                    rollout = {"metadata": {"resourceVersion": "2"},
+                               "spec": {"strategy": {"canary": {}}, "template": {"spec": {
+                                   "containers": [{"name": "app", "image": baseline_image}]}}},
+                               "status": {"phase": "Healthy", "stableRS": "baseline", "currentPodHash": "baseline"}}
+                    argv = ["promote_approved", "managed-beta", "--context", "test", "--namespace", "test",
+                            "--rollout", "help-desk", "--container", "app", "--apply"]
+                    with (
+                        patch.dict(os.environ, {"RELEASETRACE_APPROVER_TOKEN": bob["Authorization"].split()[1]}),
+                        patch("staging.promote_approved.httpx.Client", side_effect=lambda **_: nullcontext(client)),
+                        patch("staging.promote_approved.subprocess.check_output", return_value=json.dumps(rollout)) as kubectl,
+                        patch("staging.promote_approved.verify_build", side_effect=ValueError("Test attestation failure")) as verify,
+                        patch("sys.argv", argv),
+                        redirect_stderr(StringIO()),
+                    ):
+                        with self.assertRaisesRegex(SystemExit, "1"):
+                            promote_approved.main()
+                        verify.assert_called_once_with(f"registry.example/help-desk@{targets.candidate.build.image_digest}",
+                                                       targets.candidate.build.commit_sha, workflow, None)
+                        self.assertEqual(kubectl.call_count, 1)
+                        verify.reset_mock()
+                        argv.extend(("--attested-by", "example/help-desk/.github/workflows/other.yml"))
+                        with self.assertRaisesRegex(SystemExit, "1"):
+                            promote_approved.main()
+                        verify.assert_not_called()
+                        self.assertEqual(kubectl.call_count, 2)
 
                     provision("revoke", "alpha-maintainer", "52")
                     self.assertEqual(client.get(beta, headers=alice).status_code, 404)
@@ -131,6 +160,15 @@ class PipelineTest(unittest.TestCase):
                     self.assertEqual(client.get(alpha, headers=rotated).status_code, 200)
                     provision("disable", "alpha-maintainer")
                     self.assertEqual(client.get(alpha, headers=rotated).status_code, 401)
+
+                history = json.loads(provision("history", "--handle", "alpha-maintainer"))
+                self.assertEqual([event["action"] for event in history],
+                                 ["disable", "rotate", "revoke", "grant", "grant", "create"])
+                self.assertTrue(all(event["operator"] == "test-operator" for event in history))
+                self.assertTrue(all("key" not in field for event in history for field in event))
+                project_history = json.loads(provision("history", "--repository-id", "52", "--limit", "2"))
+                self.assertEqual([(event["action"], event["role"], event["installation_id"]) for event in project_history],
+                                 [("revoke", None, 62), ("grant", "viewer", 62)])
 
                 changed = json.loads(config.read_bytes())
                 changed["projects"][0]["organization"] = "gamma-team"

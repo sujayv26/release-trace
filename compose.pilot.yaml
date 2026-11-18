@@ -6,6 +6,7 @@ x-pilot-api: &pilot-api
   environment: &pilot-env
     RELEASETRACE_PROJECTS_FILE: /pilot/projects.json
     RELEASETRACE_WEBHOOK_SECRET: ${RELEASETRACE_PILOT_WEBHOOK_SECRET:?Run demo.pilot_rehearsal}
+    RELEASETRACE_OPERATOR: pilot-operator
   volumes:
     - ${RELEASETRACE_PILOT_DIR:?Run demo.pilot_rehearsal}/projects:/pilot:ro
 

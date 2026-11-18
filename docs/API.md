@@ -18,7 +18,7 @@ The FastAPI service exposes JSON endpoints and interactive API docs at `/docs`. 
 | POST /v1/runs/{id}/investigations | Accept a failed case ID, return 202 with an investigation ID; deduplicate retries |
 | GET /v1/runs/{id}/investigations/{investigation_id} | Read the report and scoped evidence references |
 | POST /v1/runs/{id}/approval | Approver submits `decision` (approve/reject) and `image_digest`; returns the saved decision, or 409 for a stale candidate, ineligible run, or conflicting decision |
-| GET /v1/runs/{id}/promotion | Return the approved stable and candidate identities if the passing GitHub build evaluation still matches the active build pair. Requires the approver token. |
+| GET /v1/runs/{id}/promotion | Return the approved build identities and the attestation workflow when configured. Requires the approver role and a passing GitHub build evaluation that matches the active build pair. |
 | POST /v1/runs/{id}/deployments | Record an approver-reported `promoted` or `aborted` outcome with Rollout UID, generation, namespace, name, candidate digest, and stable revision digest. |
 | GET /healthz and /readyz | Indicate liveness and whether dependencies are ready |
 

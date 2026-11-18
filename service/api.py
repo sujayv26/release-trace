@@ -25,7 +25,7 @@ from .evaluate_builds import BuildIdentity, ImageDigest
 from .evaluation_config import EvaluationSnapshot
 from .investigator import enqueue_investigation, investigation_key
 from .projects import Role, load_projects
-from .store import accounts, approvals, database, deliveries, deployments, enqueue, investigations, project_memberships
+from .store import accounts, approvals, as_utc, database, deliveries, deployments, enqueue, investigations, project_memberships
 
 MAX_BODY = 1024 * 1024
 DELIVERY_ID = re.compile(r"[A-Za-z0-9-]{1,128}")
@@ -141,6 +141,7 @@ class PromotionDetail(BaseModel):
     run_id: str
     baseline: BuildIdentity
     candidate: BuildIdentity
+    attestation_workflow: str | None = None
 
 
 class DeploymentObservation(BaseModel):
@@ -196,15 +197,6 @@ def error(status, code, message, request_id):
     return JSONResponse(status_code=status, content={
         "code": code, "message": message, "request_id": request_id,
     })
-
-
-def as_utc(value: datetime | None) -> datetime | None:
-    # SQLite drops offsets on storage, while PostgreSQL returns aware values.
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
 
 
 def create_app():
@@ -522,13 +514,14 @@ def create_app():
             return ApprovalDetail(**{**existing, "created_at": as_utc(existing["created_at"])})
         return record
 
-    @app.get("/v1/runs/{delivery_id}/promotion")
+    @app.get("/v1/runs/{delivery_id}/promotion", response_model_exclude_none=True)
     def read_promotion(
         delivery_id: str, response: Response, principal: Principal = Depends(authenticate),
     ) -> PromotionDetail:
         run = load_run(principal, delivery_id, deliveries.c.state, deliveries.c.commit_sha, deliveries.c.report,
                        mode, role="approver")
-        targets = projects[run["repository_id"]].targets
+        project = projects[run["repository_id"]]
+        targets = project.targets
         report = run["report"] or {}
         if delivery_id.startswith("demo-") or run["evaluation_mode"] != "build_endpoints" or run["state"] != "completed":
             raise ReadError(409, "run_not_eligible", "A completed build evaluation from a GitHub delivery is required")
@@ -543,7 +536,8 @@ def create_app():
         if approval != ("approve", targets.candidate.build.image_digest):
             raise ReadError(409, "approval_required", "A saved approval for the candidate digest is required")
         response.headers["Cache-Control"] = "no-store"
-        return PromotionDetail(run_id=delivery_id, baseline=targets.baseline.build, candidate=targets.candidate.build)
+        return PromotionDetail(run_id=delivery_id, baseline=targets.baseline.build, candidate=targets.candidate.build,
+                               attestation_workflow=project.attestation_workflow)
 
     @app.post("/v1/runs/{delivery_id}/deployments")
     def record_deployment(

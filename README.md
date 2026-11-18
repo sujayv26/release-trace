@@ -54,6 +54,7 @@ The release page shows the latest observed promotion or abort beside the saved a
 |---|---|---|
 | **Release review and worker recovery** | CI exercised signed input, duplicate delivery, a blocked release, a controlled rerun, a protected approval, and Temporal worker replacement. | [CI run](https://github.com/sujayv26/release-trace/actions/runs/44294539695) |
 | **Approved artifact promoted** | CI evaluated two registry images and verified that both stable Pods ran the approved OCI digest after promotion. | [Rollout run](https://github.com/sujayv26/release-trace/actions/runs/44301532495) |
+| **Signed build provenance verified** | GitHub Actions signed the canary image. The promotion command verified the workflow, commit, and approved digest before applying the rollout. CI rejected a different commit and image. | [Signed canary evidence](https://github.com/sujayv26/release-trace/actions/runs/44348673888) |
 | **Unhealthy canary aborted** | In one isolated kind drill, Argo detected HTTP 503 after **5.30 s**. The stable service was verified **0.22 s** after detection. The healthy revision promoted in **6.69 s**. | [Canary run and JSON artifact](https://github.com/sujayv26/release-trace/actions/runs/44293631233) |
 | **Investigator benchmarked** | Both offline methods correctly diagnosed **3 of 4 diagnosable cases**. Across six total cases, the rule made one incorrect diagnosis and the scripted Investigator made zero, using four reruns. | [Benchmark and error analysis](docs/ReleaseTrace-Agent-Build-Guide.md#5-benchmark-the-contribution) |
 

@@ -1,8 +1,10 @@
 """Provision and revoke individual reviewer credentials and project access."""
 
 import argparse
+import json
 import os
 import re
+from datetime import datetime, timezone
 from hashlib import sha256
 from secrets import token_urlsafe
 from typing import get_args
@@ -11,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from .projects import Role, managed_projects
-from .store import accounts, database, project_memberships, project_owners
+from .store import account_access_events, accounts, as_utc, database, project_memberships, project_owners
 
 HANDLE = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 ACCESS_KEY = re.compile(r"rt_[A-Za-z0-9_-]{43}")
@@ -69,6 +71,7 @@ def change_membership(connection, handle, project, role):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--operator", default=os.getenv("RELEASETRACE_OPERATOR"), help="Operator handle for the audit history")
     actions = parser.add_subparsers(dest="action", required=True)
     for action in ("create", "rotate", "disable", "grant", "revoke"):
         command = actions.add_parser(action)
@@ -77,9 +80,25 @@ def main():
             command.add_argument("repository_id", type=int)
         if action == "grant":
             command.add_argument("role", choices=get_args(Role))
+    history = actions.add_parser("history", help="Review recent managed access commands as JSON")
+    history.add_argument("--handle")
+    history.add_argument("--repository-id", type=int)
+    history.add_argument("--limit", type=int, default=100)
     args = parser.parse_args()
-    if not HANDLE.fullmatch(args.handle):
-        parser.error("Use a lowercase account handle of up to 64 characters")
+    if any(handle is not None and not HANDLE.fullmatch(handle) for handle in (args.handle, args.operator)):
+        parser.error("Use lowercase handles of up to 64 characters")
+    if args.action == "history":
+        if not 1 <= args.limit <= 1000:
+            parser.error("Use a history limit between 1 and 1000")
+        try:
+            engine = database()
+            try:
+                print(json.dumps(read_history(engine, args.handle, args.repository_id, args.limit)))
+            finally:
+                engine.dispose()
+        except (KeyError, SQLAlchemyError):
+            parser.exit(1, "Could not read managed access history. Check the database and migrations.\n")
+        return
     directory = os.getenv("RELEASETRACE_PROJECTS_FILE")
     if not directory:
         parser.error("RELEASETRACE_PROJECTS_FILE is required for managed accounts")
@@ -87,6 +106,8 @@ def main():
         projects = managed_projects(directory)
         engine = database()
         key = None
+        project = None
+        role = getattr(args, "role", None)
         try:
             with engine.begin() as connection:
                 if args.action in ("create", "rotate"):
@@ -101,7 +122,14 @@ def main():
                     project = projects.get(args.repository_id)
                     if project is None:
                         raise ValueError("Repository does not exist in the managed project file")
-                    change_membership(connection, args.handle, project, getattr(args, "role", None))
+                    change_membership(connection, args.handle, project, role)
+                connection.execute(account_access_events.insert().values(
+                    action=args.action, handle=args.handle, operator=args.operator, role=role,
+                    repository_id=project.repository_id if project else None,
+                    installation_id=project.installation_id if project else None,
+                    organization=project.organization if project else None,
+                    recorded_at=datetime.now(timezone.utc),
+                ))
         finally:
             engine.dispose()
     except ValueError as error:
@@ -110,6 +138,17 @@ def main():
         parser.exit(1, "Could not update managed access. Check the database, migration, and account name.\n")
     if key is not None:
         print(key)
+
+
+def read_history(engine, handle, repository_id, limit):
+    query = select(account_access_events).order_by(account_access_events.c.id.desc()).limit(limit)
+    if handle is not None:
+        query = query.where(account_access_events.c.handle == handle)
+    if repository_id is not None:
+        query = query.where(account_access_events.c.repository_id == repository_id)
+    with engine.connect() as connection:
+        return [{**event, "recorded_at": as_utc(event["recorded_at"]).isoformat()}
+                for event in connection.execute(query).mappings()]
 
 
 if __name__ == "__main__":

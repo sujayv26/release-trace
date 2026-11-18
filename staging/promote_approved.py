@@ -14,9 +14,9 @@ from pydantic import ValidationError
 
 from service.api import DELIVERY_ID, DeploymentObservation, PromotionDetail
 from service.evaluate_builds import LOOPBACK
+from service.projects import BUILD_WORKFLOW
 
 RESOURCE_NAME = re.compile(r"[a-z0-9](?:[-.a-z0-9]*[a-z0-9])?")
-BUILD_WORKFLOW = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml")
 HASH_LABEL = "rollouts-pod-template-hash"
 
 
@@ -120,8 +120,6 @@ def main():
         parser.error("--observe must be between 1 and 3600 seconds")
     if args.attested_by and not BUILD_WORKFLOW.fullmatch(args.attested_by):
         parser.error("--attested-by requires an owner/repo/.github/workflows/build.yml reference")
-    if args.attestation_bundle is not None and not args.attested_by:
-        parser.error("--attestation-bundle requires --attested-by")
     base = urlsplit(args.api_url)
     local = base.hostname in LOOPBACK or base.hostname == "::1"
     if (not base.hostname or base.username is not None or base.password is not None
@@ -150,12 +148,23 @@ def main():
             promotion = PromotionDetail.model_validate_json(response.content)
             if promotion.run_id != args.run_id:
                 raise ValueError("The promotion response identifies a different run")
+            workflow = promotion.attestation_workflow or args.attested_by
+            if promotion.attestation_workflow and args.attested_by and args.attested_by != workflow:
+                raise ValueError("The requested signer does not match the project's configured attestation workflow")
+            if workflow is not None and not BUILD_WORKFLOW.fullmatch(workflow):
+                raise ValueError("Invalid project attestation workflow")
+            if args.attestation_bundle is not None and workflow is None:
+                raise ValueError("A trusted attestation workflow is required to use a bundle")
             image, patch = rollout_patch(rollout, args.container, promotion)
             state = "preview" if patch else "already_configured"
             if args.observe is not None and patch and not args.apply:
                 raise ValueError("The candidate is not configured. Use --apply to start the canary.")
-            if args.attested_by:
-                verify_build(image, promotion.candidate.commit_sha, args.attested_by, args.attestation_bundle)
+            if workflow:
+                verify_build(image, promotion.candidate.commit_sha, workflow, args.attestation_bundle)
+                if patch and args.apply:
+                    refreshed = client.get(f"{approval_url}/promotion", headers=headers).raise_for_status()
+                    if PromotionDetail.model_validate_json(refreshed.content) != promotion:
+                        raise ValueError("Promotion authorization changed during attestation verification")
             if patch and args.apply:
                 rollout = json.loads(subprocess.check_output(
                     [*kubectl, "patch", resource, "--type=json",
@@ -177,8 +186,8 @@ def main():
     except ValueError as error:
         parser.exit(1, f"{error}\n")
     result = {"run_id": promotion.run_id, "image": image, "state": state}
-    if args.attested_by:
-        result["verified_build"] = {"workflow": args.attested_by, "commit_sha": promotion.candidate.commit_sha,
+    if workflow:
+        result["verified_build"] = {"workflow": workflow, "commit_sha": promotion.candidate.commit_sha,
                                     "image_digest": promotion.candidate.image_digest}
     if observation is not None:
         result["deployment"] = observation

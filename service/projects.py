@@ -14,6 +14,7 @@ from .evaluation_config import EvaluationSnapshot, read_evaluation
 Role = Literal["viewer", "maintainer", "approver"]
 GitHubID = Annotated[int, Field(strict=True, gt=0, le=2**63 - 1)]
 REPOSITORY_NAME = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9_.-]{1,100}")
+BUILD_WORKFLOW = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9_.-]{1,100}/\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml")
 
 
 def valid_repository_name(name):
@@ -30,6 +31,7 @@ class ProjectConfig(BaseModel):
     build_targets_file: Path | None = None
     evaluation_file: Path | None = None
     github_repository: str | None = None
+    attestation_workflow: str | None = None
 
     @field_validator("github_repository")
     @classmethod
@@ -37,6 +39,13 @@ class ProjectConfig(BaseModel):
         if name is not None and not valid_repository_name(name):
             raise ValueError("Expected a GitHub repository in owner/name form")
         return name
+
+    @field_validator("attestation_workflow")
+    @classmethod
+    def check_build_workflow(cls, workflow):
+        if workflow is not None and not BUILD_WORKFLOW.fullmatch(workflow):
+            raise ValueError("Expected an owner/repo/.github/workflows/build.yml reference")
+        return workflow
 
 
 class ProjectDirectory(BaseModel):
@@ -53,6 +62,7 @@ class Project:
     targets: BuildTargets | None
     evaluation: EvaluationSnapshot | None = None
     github_repository: str | None = None
+    attestation_workflow: str | None = None
 
 
 def read_targets(path):
@@ -86,7 +96,7 @@ def managed_projects(path):
         evaluation = read_evaluation(path.parent / entry.evaluation_file) if entry.evaluation_file else None
         projects[entry.repository_id] = Project(
             entry.repository_id, entry.installation_id, entry.organization, entry.name, targets, evaluation,
-            entry.github_repository,
+            entry.github_repository, entry.attestation_workflow,
         )
     return projects
 

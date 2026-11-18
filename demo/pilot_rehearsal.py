@@ -162,8 +162,13 @@ def record_and_restore(compose, directory, path, alpha, key):
         require(client.get(path).raise_for_status().json() == original, "Restored API returned different release records")
         require(client.get(f"{path}/cases").raise_for_status().json()
                 == alpha.get(f"{path}/cases").raise_for_status().json(), "Restored API returned different case evidence")
+    command = ("python", "-m", "service.accounts", "history")
+    source_audit = json.loads(compose("exec", "-T", "api", *command, capture=True))
+    restored_audit = json.loads(compose("exec", "-T", "restore-api", *command, capture=True))
+    require(len(source_audit) == 5 and restored_audit == source_audit, "Restore returned different access history")
     return {"approval": approval, "rollout_observation": deployment, "observation_source": "synthetic fixture",
-            "restore_database": "releasetrace_restored", "api_run_and_cases_match": True}
+            "restore_database": "releasetrace_restored", "api_run_and_cases_match": True,
+            "restored_access_events": len(restored_audit)}
 
 
 def exercise(compose, directory, secret):

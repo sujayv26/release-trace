@@ -8,7 +8,7 @@
 | 4 · Investigate | Bounded LangGraph reruns and a six-case offline holdout. The hosted benchmark adapter is available. | Collect and analyze live model results. |
 | 5 · Recover and approve | Linux CI verified Temporal worker replacement. Compose verified digest binding, authorization, and retry. Pipeline tests cover stale candidates. | |
 | 6 · Stage a rollout | A kind drill observed healthy promotion and automatic canary abort. A connected rehearsal verified the same OCI digest in evaluation, approval, Argo submission, and both stable Pods. | Run against a live GitHub App delivery and publish the Check on the evaluated commit. |
-| 7 · Manage project access | Individual reviewer keys, operator-managed organization and project setup, per-project roles, a dashboard project switcher, and tests for cross-project access and revocation. | Verify onboarding and operations in a hosted environment. |
+| 7 · Manage project access | Individual reviewer keys, operator-managed organization and project setup, per-project roles, an operator audit history, a dashboard project switcher, and tests for cross-project access and revocation. | Verify onboarding and operations in a hosted environment. |
 | 8 · Configure project evaluations | Versioned citation cases and gates per project. Queued jobs retain the full evaluation snapshot and the dashboard shows its revisions and fingerprints. | Exercise customer-defined cases against a live application. |
 
 Start with the [local demo](../README.md#run-the-local-demo). The [operations guide](OPERATIONS.md) covers live verification and optional workers. The [product requirements](PRD.md) describe the intended release workflow.
