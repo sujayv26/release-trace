@@ -2,6 +2,8 @@
 
 ReleaseTrace helps teams review AI application releases. It runs the same policy cases against stable and candidate builds, blocks critical regressions, and gives reviewers evidence to investigate failures and approve the exact build they evaluated.
 
+[Technical skills and stack](#technical-skills-and-stack) · [Local demo](#run-the-local-demo) · [Verification and rollout evidence](#verification-and-rollout-evidence)
+
 ```mermaid
 flowchart TB
     accTitle: ReleaseTrace review workflow
@@ -32,6 +34,18 @@ flowchart TB
 The rerun restores the stable retrieval setting for one case and explains the regression. The original evaluation still records the failed critical case. The corrected build gets its own evaluation and decision.
 
 </details>
+
+## Technical skills and stack
+
+| Skill area | Technologies | What I built |
+|---|---|---|
+| **Full-stack web development** | TypeScript, React, Next.js App Router, CSS | A server-rendered dashboard for comparing release runs, reviewing investigation evidence, and approving a candidate by image digest. [Dashboard source](dashboard/app) |
+| **Backend APIs and security** | Python, FastAPI, Pydantic, Uvicorn, HMAC-SHA256 | Typed HTTP endpoints, signed GitHub webhook verification, delivery deduplication, and repository-scoped viewer, maintainer, and approver access. [API implementation](service/api.py) |
+| **Database design and worker reliability** | PostgreSQL, SQLite, SQLAlchemy, Alembic, Temporal | A persistent queue and migration history for release evidence, plus a worker-replacement test that checks a retry preserves the committed report. [Database design](docs/DATABASE.md) · [Recovery test](service/test_temporal_worker.py) |
+| **AI evaluation and agent workflows** | LangGraph, HTTPX, OpenAI API adapter | A deterministic release gate, an Investigator bounded to one controlled rerun, and a holdout benchmark that compares diagnosis accuracy and abstentions. The hosted model adapter is available as an optional benchmark path. [Evaluator](service/evaluate_builds.py) · [Investigator benchmark](service/investigation_benchmark.py) |
+| **GitHub integrations** | GitHub Apps, GitHub Checks API, PyJWT | Check preview and publishing logic that ties results to the evaluated commit, with retries and reconciliation when a publish response is lost. [Check publisher](service/check_queue.py) |
+| **Containerization and progressive delivery** | Docker, Docker Compose, OCI image digests, Kubernetes, kind, Argo Rollouts | A local demo stack and an isolated staging workflow that verifies the approved digest is the one running after promotion. A separate drill exercises automatic canary abort. [Staging workflow](.github/workflows/staging.yml) |
+| **Automated testing and CI** | GitHub Actions, Python `unittest`, HTTPX test transports | Unit, database integration, worker recovery, and Compose smoke coverage for the release review path, alongside a production dashboard build. [CI workflow](.github/workflows/ci.yml) |
 
 ## Run the local demo
 
