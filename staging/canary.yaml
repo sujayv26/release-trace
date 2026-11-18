@@ -23,6 +23,8 @@ kind: AnalysisTemplate
 metadata:
   name: canary-health
 spec:
+  args:
+    - name: revision-hash
   metrics:
     - name: healthy-response
       count: 1
@@ -39,26 +41,32 @@ spec:
                 containers:
                   - name: probe
                     image: python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
+                    env:
+                      - name: EXPECTED_HASH
+                        value: "{{args.revision-hash}}"
                     command:
                       - python
                       - -c
                       - |
+                        import os
                         import time
                         from urllib.error import HTTPError, URLError
                         from urllib.request import urlopen
 
-                        for attempt in range(10):
+                        expected = os.environ["EXPECTED_HASH"]
+                        for attempt in range(15):
                             try:
                                 with urlopen("http://canary:8080", timeout=2) as response:
-                                    if response.read() == b"healthy":
+                                    if response.headers.get("X-Revision-Hash") == expected:
                                         break
-                            except HTTPError:
-                                raise
+                            except HTTPError as error:
+                                if error.headers.get("X-Revision-Hash") == expected:
+                                    raise SystemExit(f"HTTP {error.code} from {expected}") from None
                             except (URLError, TimeoutError):
                                 pass
                             time.sleep(1)
                         else:
-                            raise SystemExit("Canary service was unreachable")
+                            raise SystemExit("Canary service did not reach the expected revision")
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout
@@ -79,6 +87,10 @@ spec:
         - analysis:
             templates:
               - templateName: canary-health
+            args:
+              - name: revision-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
   template:
     metadata:
       labels:
@@ -91,6 +103,10 @@ spec:
           env:
             - name: REVISION
               value: baseline
+            - name: REVISION_HASH
+              valueFrom:
+                fieldRef:
+                  fieldPath: "metadata.labels['rollouts-pod-template-hash']"
           ports:
             - containerPort: 8080
           readinessProbe:
@@ -108,6 +124,7 @@ spec:
                   def do_GET(self):
                       revision = os.environ["REVISION"]
                       self.send_response(503 if revision == "unhealthy" else 200)
+                      self.send_header("X-Revision-Hash", os.environ["REVISION_HASH"])
                       self.end_headers()
                       self.wfile.write(revision.encode())
 

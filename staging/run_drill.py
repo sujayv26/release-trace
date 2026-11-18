@@ -58,7 +58,10 @@ def main():
 
     def stable_response():
         code = 'from urllib.request import urlopen; print(urlopen("http://stable:8080", timeout=3).read().decode())'
-        return kubectl("exec", "service/stable", "--", "python", "-c", code).strip()
+        try:
+            return kubectl("exec", "service/stable", "--", "python", "-c", code).strip()
+        except subprocess.CalledProcessError:
+            return None
 
     manifest = Path(__file__).with_name("canary.yaml")
     kubectl("create", "-f", str(manifest))
@@ -68,8 +71,7 @@ def main():
     patch_revision("healthy")
     healthy = wait("healthy promotion", lambda: promoted(baseline))
     successful = wait("successful analysis", lambda: analysis_runs("Successful"))
-    if stable_response() != "healthy":
-        raise SystemExit("The stable service did not serve the promoted revision")
+    wait("stable service to serve the promoted revision", lambda: stable_response() == "healthy")
     promotion_seconds = time.monotonic() - started
 
     previous_failed = analysis_runs("Failed")
@@ -91,16 +93,20 @@ def main():
         )
 
     wait("automatic abort with the same stable revision", aborted)
-    if stable_response() != "healthy":
-        raise SystemExit("The stable service did not serve the previous revision after abort")
+    wait("stable service to serve the previous revision after abort", lambda: stable_response() == "healthy")
     recovered = time.monotonic()
+    attempted = get(ROLLOUT)["status"]["currentPodHash"]
+    measurement = get("analysisrun", failed)["status"]["metricResults"][0]["measurements"][0]
+    job = measurement["metadata"]["job-name"]
+    if f"HTTP 503 from {attempted}" not in kubectl("logs", f"job/{job}").splitlines():
+        raise SystemExit("The failed analysis did not observe HTTP 503 from the attempted revision")
     print(json.dumps({
         "healthy_promotion": {
             "previous_hash": baseline, "stable_hash": healthy, "analysis_runs": sorted(successful),
             "seconds": round(promotion_seconds, 3),
         },
         "unhealthy_abort": {
-            "stable_hash": healthy, "failed_analysis_run": failed,
+            "stable_hash": healthy, "aborted_hash": attempted, "failed_analysis_run": failed, "observed_http_status": 503,
             "seconds_to_detect": round(detected - started, 3),
             "seconds_from_detection_to_stable_probe": round(recovered - detected, 3),
         },
