@@ -10,6 +10,22 @@ from urllib.request import Request, urlopen
 from .evaluate_builds import BuildTargets
 
 
+def signed_push_request(api_url, repo, installation, sha, delivery_id, secret):
+    body = json.dumps({
+        "after": sha,
+        "ref": "refs/heads/demo",
+        "deleted": False,
+        "repository": {"id": repo},
+        "installation": {"id": installation},
+    }).encode()
+    return Request(f"{api_url}/webhooks/github", data=body, headers={
+        "Content-Type": "application/json",
+        "X-GitHub-Event": "push",
+        "X-GitHub-Delivery": delivery_id,
+        "X-Hub-Signature-256": "sha256=" + hmac.digest(secret, body, "sha256").hex(),
+    })
+
+
 def queue_demo(targets_path=None, *, extended=False):
     repo = int(os.environ["RELEASETRACE_REPOSITORY_ID"])
     installation = int(os.environ["RELEASETRACE_INSTALLATION_ID"])
@@ -22,19 +38,7 @@ def queue_demo(targets_path=None, *, extended=False):
         targets = BuildTargets.model_validate_json(targets_path.read_bytes())
         sha = targets.candidate.build.commit_sha
         delivery_id += f"-build-{sha}"
-    body = json.dumps({
-        "after": sha,
-        "ref": "refs/heads/demo",
-        "deleted": False,
-        "repository": {"id": repo},
-        "installation": {"id": installation},
-    }).encode()
-    request = Request("http://127.0.0.1:8000/webhooks/github", data=body, headers={
-        "Content-Type": "application/json",
-        "X-GitHub-Event": "push",
-        "X-GitHub-Delivery": delivery_id,
-        "X-Hub-Signature-256": "sha256=" + hmac.digest(secret, body, "sha256").hex(),
-    })
+    request = signed_push_request("http://127.0.0.1:8000", repo, installation, sha, delivery_id, secret)
     with urlopen(request, timeout=5) as response:
         if response.status != 202:
             raise RuntimeError(f"Expected webhook HTTP 202, received {response.status}")

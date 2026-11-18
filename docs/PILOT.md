@@ -1,5 +1,49 @@
 # Restricted pilot runbook
 
+## Rehearse locally from a clean checkout
+
+Use Docker with Compose v2 and a Linux container engine, Python 3.10 or later,
+and OpenSSL 1.1.1 or later on `PATH`. Run these commands from a terminal with
+access to Docker. The rehearsal uses only synthetic data.
+
+```bash
+git clone --branch develop --single-branch https://github.com/sujayv26/release-trace.git release-trace-pilot
+cd release-trace-pilot
+python -m pip install -r service/requirements.txt
+python -m demo.pilot_rehearsal --evidence pilot-evidence.json
+```
+
+The command prints the Compose commands, uses a unique project name and
+loopback ports, and removes its containers and test volume on exit. It
+generates a temporary TLS certificate for the fixture endpoints and injects its
+trust bundle into the rehearsal worker. The worker uses the same HTTPS
+destination enforcement as the hosted setup. Reviewer keys and the temporary
+database dump stay out of the printed evidence. Keep the generated JSON as the
+record of the rehearsal.
+
+1. Check that `pilot-alpha` passes `refund-window` and `pilot-beta` passes
+   `password-reset`, each with its own suite and gate revision and fingerprints.
+   The command creates individual keys with `service.accounts`. Expect `404`
+   for both cross-project reads and `401` for the disabled beta key.
+2. The command switches beta to a different HTTPS candidate path and restarts
+   the API. Expect `destination_not_approved`, zero requests to that path,
+   and one request to the still-approved baseline.
+3. The fixture holds the first evaluation request for `pilot-alpha-recovery`.
+   The command kills the worker while waiting, checks that the delivery is
+   queued, redelivers it, and restarts the worker. Expect `duplicate` for
+   redelivery and exactly one completed run in history. The interrupted request
+   itself is repeated after restart.
+4. The alpha approver records a decision on the recovered passing build and
+   submits a synthetic `aborted` rollout observation. Both retries must return
+   their original records. The command uses `pg_dump` and `pg_restore` to copy
+   the records into `releasetrace_restored`, then starts a separate API against
+   it. The returned run, case evidence, approval, and rollout must match the
+   source API exactly.
+
+This drill uses a locally signed GitHub-shaped delivery and a synthetic rollout
+observation. Follow the hosted checklist for GitHub App delivery, attestation
+verification, and measured hosted canary outcomes.
+
 ## Prepare the hosted environment
 
 The [Render Blueprint](../render.yaml) defines a dashboard and an API with HTTPS ingress, a background worker, and PostgreSQL on the private network. It uses the `develop` branch and disables automatic service deploys. PostgreSQL has no public IP allowlist entries. The dashboard talks to the API over the private network. Reviewers authenticate with managed account keys. GitHub pushes require the webhook signature and a configured repository and installation.

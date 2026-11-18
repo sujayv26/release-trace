@@ -120,3 +120,20 @@ jobs:
       - name: Tear down CI stack
         if: always()
         run: docker compose -f compose.yaml -f compose.approval.yaml down --volumes
+  pilot:
+    name: Local pilot operator rehearsal
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r service/requirements.txt
+      - name: Follow the pilot runbook from a clean checkout
+        run: python -m demo.pilot_rehearsal --evidence "$RUNNER_TEMP/pilot-evidence.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-pilot-evidence
+          path: ${{ runner.temp }}/pilot-evidence.json
+          if-no-files-found: error

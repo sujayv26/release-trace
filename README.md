@@ -125,7 +125,7 @@ Install `service/requirements.txt` to run the [service tests and offline Investi
 
 ## Documentation
 
-See the [restricted pilot runbook](docs/PILOT.md) for the hosted configuration, destination allowlist, provenance verification, and recovery drills.
+See the [restricted pilot runbook](docs/PILOT.md) for the clean-checkout Compose rehearsal, hosted configuration, destination allowlist, provenance verification, and recovery drills.
 
 | Guide | Contents |
 |---|---|
