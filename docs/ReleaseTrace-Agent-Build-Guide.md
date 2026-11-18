@@ -1,13 +1,21 @@
 # ReleaseTrace
 ## Experimental diagnosis agent · Codex build guide
 
-ReleaseTrace is the working name for VerifiAI. This guide expands the investigation section of the existing platform guide. Use the existing guide for GitHub release checks, Temporal, the dashboard, and staged deployment. Use this guide to build the diagnosis agent and demonstrate whether it improves on simpler approaches.
+ReleaseTrace is the platform. **Investigator** is the feature reviewers use to examine a failed case through a controlled rerun. See the [implementation plan](IMPLEMENTATION_PLAN.md) for platform milestones and the [README](../README.md) for the runnable demo.
 
 **User outcome.** From a failed release check, an engineer can learn which change is most likely responsible, which experiment supports that diagnosis, and what evidence is still missing.
 
 **Research question.** Under an explicit cost and experiment budget, does an investigator that can run controlled reruns diagnose more regressions correctly than a model that only reads the same initial evidence?
 
 ## 1. First user workflow
+
+### Local demo today
+
+Complete a synthetic release run, sign in to the dashboard with the project maintainer token, and open the failed account-closure case. Select **Investigate**. The worker restores the stable retrieval setting for that case while preserving the candidate prompt. The saved report compares the stable response, candidate response, and rerun. A viewer can open the report after it has been requested. The release gate retains its original verdict.
+
+The current implementation uses one deterministic retrieval intervention. It can return **supported** or **inconclusive**. LangGraph, model selection, staging experiments, and the held-out benchmark are planned work.
+
+### Planned connected workflow
 
 1. A developer opens the failing case from a GitHub check. Both stable and candidate runs have completed on the same versioned case.
 2. The developer selects **Investigate**. The service starts a run for that exact evaluation, case, and candidate artifact.
@@ -16,24 +24,26 @@ ReleaseTrace is the working name for VerifiAI. This guide expands the investigat
 5. The developer sees a diagnosis, evidence links, what changed in the experiment, trial results, and a suggested next check. They can open the exact artifact behind each claim.
 6. The developer makes a fix through the normal PR workflow. The evaluator owns the release verdict and the rollout controller owns deployment.
 
-**First demo.** The candidate cites policy v1 where v2 is required. Swapping retrieval settings restores the correct citation. Show the baseline, candidate, and intervention side by side. Add a second case where the available reruns cannot distinguish competing explanations and the report is inconclusive.
+**Verified fixture outcomes.** The candidate cites policy v1 where v2 is required. Swapping retrieval settings restores the correct citation. A separate test covers a case where the swap leaves the result inconclusive.
 
 ## 2. Stack and module boundaries
 
-Use Python, LangGraph, Pydantic, pytest, and one model-provider SDK behind a small adapter. Use a scripted model adapter for deterministic local tests. Integrate with the existing FastAPI, PostgreSQL, and worker setup when the CLI path is stable. Temporal can coordinate the enclosing release workflow later.
+Use Python, FastAPI, Pydantic, SQLAlchemy, Alembic, and the existing `unittest` suite for the current implementation. Add LangGraph and a provider adapter after the controlled workflow is stable. Use a scripted adapter for deterministic graph tests. Temporal can coordinate the enclosing release workflow later.
 
 | Module | Responsibility |
 |---|---|
-| packages/investigation/contracts.py | Typed requests, tool results, experiments, reports |
-| packages/investigation/graph.py | Agent state, transitions, tool dispatch and stop conditions |
-| packages/investigation/tools.py | Read evidence and submit validated experiment requests |
-| packages/evaluation/ | Execute and score baseline, candidate, and intervention runs |
-| apps/worker/ | Run the investigation asynchronously and persist results |
-| tests/investigation/ | Fixture, failure, budget, and benchmark tests |
+| [`service/api.py`](../service/api.py) | Typed requests, project access, and investigation reports |
+| [`service/investigator.py`](../service/investigator.py) | Investigation queue, retrieval rerun, and diagnosis |
+| [`demo/release_trace_demo.py`](../demo/release_trace_demo.py) | Shared citation scorer and controlled experiment |
+| [`service/worker.py`](../service/worker.py) | Background execution and report persistence |
+| [`dashboard/app/runs/`](../dashboard/app/runs/) | Open the failed case and compare investigation evidence |
+| [`service/test_investigator.py`](../service/test_investigator.py) and [`service/test_pipeline.py`](../service/test_pipeline.py) | Diagnosis, abstention, access, and retry checks |
 
 Follow the existing module layout if implementation has begun. Share schemas and reuse evaluation scoring across initial runs and experiments.
 
 ## 3. Contracts and boundaries
+
+These are target contracts for the multi-experiment investigator. The current API accepts a saved run ID and failed case ID. The worker reads the pinned inputs of that run and records one result per case and intervention.
 
 | Object | Required fields |
 |---|---|
@@ -81,28 +91,14 @@ When candidate behavior is stochastic, record repeats for both candidate and int
 
 | Phase | Codex task | Acceptance criteria |
 |---|---|---|
-| 1. Reproduce a failure | Create the key-free sample case, pinned artifact manifests, and experiment runner. | One intervention restores the expected citation. The manifest confirms only the intended parameter changed. Repeat requests produce one logical experiment. |
-| 2. Build the graph | Implement tools, transitions, typed report validation, and a scripted local adapter. | The agent can select the useful experiment, handle an ambiguous case, and stop at the budget. Unsupported intervention and cross-project reads are rejected. |
-| 3. Measure it | Add the hosted model adapter and benchmark all three methods. | The report contains actual results, costs where measurable, denominators, and failed diagnoses. A provider timeout ends in a visible failure or inconclusive result. |
-| 4. Connect it to the platform | Add asynchronous worker invocation, persisted results, and the dashboard flow. | A reviewer can open a PR check, investigate a specific case, inspect evidence, and recover from worker redelivery without duplicate logical experiments. |
-| 5. Finish the flagship demo | Show diagnosis, corrected release, and deployment using the platform guide. | A reviewer can reproduce the local investigation and inspect a recorded canary abort drill. |
+| 1. Reproduce a failure | Complete. The fixture scorer and retrieval swap run locally. | One intervention restores the expected citation. The rerun changes only retrieval. |
+| 2. Connect the controlled rerun | Complete for synthetic runs. Queue requests, persist results, and compare them in the dashboard. | Maintainer requests deduplicate. Viewers can read the saved report. The original gate remains intact. |
+| 3. Build the graph | Implement tools, transitions, typed report validation, and a scripted adapter. | The agent selects a useful intervention, handles ambiguity, and stops at its budget. |
+| 4. Measure it | Add the hosted model adapter and compare all three methods on held-out cases. | The report includes actual results, costs where measurable, denominators, and error analysis. |
+| 5. Finish the flagship demo | Connect deployment-backed investigation and exercise staged rollout. | A reviewer can trace a failed check to a diagnosis and inspect a recorded canary abort drill. |
 
-## 7. First prompt to paste into Codex
+## 7. Next implementation step
 
 ```text
-Read AGENTS.md if present, this agent guide, and the existing platform guide. Inspect the repo and preserve existing contracts. Implement Phase 1 only. Build one outdated-policy citation scenario with pinned baseline and candidate configurations, a fixture evaluator, and a controlled retrieval swap. Reuse the same scoring rule across all variants. Emit a structured report showing the manifest, changed parameter, score and evidence. Provide a documented local command that requires no hosted model, cloud credentials or cluster. Test the single-variable invariant, retry deduplication and missing evidence. Run the checks and report what passed and what remains unverified.
+Use the saved synthetic run and controlled retrieval experiment as the first LangGraph tools. Add a scripted local model adapter and enforce tool and step budgets. Test a supported diagnosis, an inconclusive case, and budget exhaustion. Preserve the existing investigation API and independent release verdict.
 ```
-
-For later phases, provide the previous acceptance results and request one phase at a time. Keep platform-wide instructions in the repository's AGENTS.md and put this file under docs/.
-
-## 8. Naming shortlist
-
-| Name | Emphasis |
-|---|---|
-| **ReleaseTrace** | The full release workflow with a traceable diagnosis |
-| **RevisionLab** | Controlled experiments across application versions |
-| **RegressionLab** | Technical and direct, with emphasis on reproducing regressions |
-| **CanaryLens** | Release observation and rollout analysis |
-| **ChangeProof** | Evidence for release decisions |
-
-Use **ReleaseTrace** for the platform and **Investigator** for the feature users launch from a failed case. These are working names. Availability has not been checked.
