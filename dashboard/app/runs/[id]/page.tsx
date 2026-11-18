@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { Status } from '../../components';
+import { RunTime, Status } from '../../components';
 import { type Case, type Page, readApi, ReleaseApiError, type RunDetail, type Variant, viewerToken } from '../../../lib/releases';
 
 function Evidence({ label, variant }: { label: string; variant: Variant }) {
@@ -48,6 +48,7 @@ export default async function RunPage({ params, searchParams }: {
       <Link href="/">← Release history</Link>
       <h1>Release evaluation</h1>
       <p className="commit"><code>{run.commit_sha}</code> <Status value={report ? run.state : 'pending'} /></p>
+      <p>Queued <RunTime value={run.created_at} />{report && <> · Completed <RunTime value={run.completed_at} /></>}</p>
       <p className="intro">Synthetic evaluation</p>
       {report ? (
         <>

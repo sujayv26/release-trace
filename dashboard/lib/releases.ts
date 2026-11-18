@@ -9,6 +9,7 @@ export type Run = {
   state: string;
   baseline_verdict: string | null;
   candidate_verdict: string | null;
+  created_at: string | null;
 };
 
 type Evidence = { id: string; revision: number; text: string };
@@ -27,6 +28,8 @@ export type RunDetail = {
   id: string;
   commit_sha: string;
   state: string;
+  created_at: string | null;
+  completed_at: string | null;
   report: { baseline: Gate; candidate: Gate; dataset_digest: string; policy_digest: string } | null;
 };
 
