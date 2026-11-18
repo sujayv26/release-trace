@@ -64,6 +64,8 @@ export default async function RunPage({ params, searchParams }: {
         <>
           <p>Release gate <Status value={report.verdict ?? report.candidate.verdict} /></p>
           {report.reason === 'baseline_not_verified' && <p>The stable build did not clear the release gate.</p>}
+          {run.github_check_id && <p>Published GitHub Check <code>{run.github_check_id}</code></p>}
+          {run.github_check_retry_at && <p>GitHub Check publication will retry after <RunTime value={run.github_check_retry_at} />.</p>}
           <div className="comparison" aria-label="Gate decisions">
             {(['baseline', 'candidate'] as const).map((variant) => (
               <section className="panel result" key={variant}>

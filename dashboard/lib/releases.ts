@@ -43,6 +43,8 @@ export type RunDetail = {
   state: string;
   created_at: string | null;
   completed_at: string | null;
+  github_check_id: number | null;
+  github_check_retry_at: string | null;
   evaluation_mode: EvaluationMode;
   report: Report | null;
 };
