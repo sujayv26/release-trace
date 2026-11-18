@@ -24,6 +24,7 @@ export type Case = {
   critical: boolean;
   baseline: Variant;
   candidate: Variant;
+  investigation_id: string | null;
 };
 
 type Gate = { verdict: string; score: number; critical_failures: string[] };
@@ -46,7 +47,25 @@ export type RunDetail = {
   github_check_id: number | null;
   github_check_retry_at: string | null;
   evaluation_mode: EvaluationMode;
+  can_investigate: boolean;
   report: Report | null;
+};
+
+export type Investigation = {
+  investigation_id: string;
+  case_id: string;
+  state: string;
+  report: {
+    outcome: 'supported' | 'inconclusive';
+    reason: string;
+    required_citation: string;
+    baseline: Variant;
+    candidate: Variant;
+    experiment: Variant | null;
+    changed_parameter: { name: string; before: string; after: string } | null;
+    dataset_digest: string;
+    policy_digest: string;
+  } | null;
 };
 
 export type Page<T> = { items: T[]; next_cursor: string | null };
@@ -67,10 +86,12 @@ export function historyPath() {
   return `/v1/projects/${repository}/runs`;
 }
 
-export async function readApi<T>(path: string, token: string): Promise<T> {
+export async function readApi<T>(path: string, token: string, body?: object): Promise<T> {
   const base = process.env.RELEASETRACE_API_URL ?? 'http://127.0.0.1:8000';
   const response = await fetch(new URL(path, base), {
-    headers: { Authorization: `Bearer ${token}` },
+    method: body ? 'POST' : 'GET',
+    body: body ? JSON.stringify(body) : undefined,
+    headers: { Authorization: `Bearer ${token}`, ...(body && { 'Content-Type': 'application/json' }) },
     cache: 'no-store',
     redirect: 'error',
     signal: AbortSignal.timeout(5_000),

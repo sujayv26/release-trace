@@ -2,7 +2,7 @@
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { accessCookie, historyPath, readApi, ReleaseApiError } from '../lib/releases';
+import { accessCookie, historyPath, readApi, ReleaseApiError, viewerToken } from '../lib/releases';
 
 export async function signIn(form: FormData) {
   const token = form.get('token');
@@ -26,4 +26,23 @@ export async function signIn(form: FormData) {
 export async function signOut() {
   (await cookies()).delete(accessCookie);
   redirect('/');
+}
+
+export async function startInvestigation(id: string, caseId: string) {
+  if (!/^[A-Za-z0-9-]{1,128}$/.test(id)) redirect('/');
+  const token = await viewerToken();
+  if (!token) redirect('/');
+  const path = `/runs/${id}`;
+  let investigationId: string;
+  try {
+    const result = await readApi<{ investigation_id: string }>(
+      `/v1${path}/investigations`, token, { case_id: caseId },
+    );
+    investigationId = result.investigation_id;
+  } catch (error) {
+    if (error instanceof ReleaseApiError && error.status === 401) redirect('/');
+    const reason = error instanceof ReleaseApiError && error.status === 403 ? 'access' : 'unavailable';
+    redirect(`${path}?investigation=${reason}`);
+  }
+  redirect(`${path}/investigations/${encodeURIComponent(investigationId)}`);
 }

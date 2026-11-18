@@ -175,7 +175,12 @@ Use the automated publisher or the manual publishing command for a delivery.
 ## Investigate a failed synthetic case
 
 Apply migrations with `python -m service.store` and configure a separate
-`RELEASETRACE_MAINTAINER_TOKEN` on the API. After a synthetic run completes,
+`RELEASETRACE_MAINTAINER_TOKEN` on the API. Sign in to the dashboard with that
+token, open a completed synthetic run, and select **Investigate** on a failed
+case. Refresh the report when the worker finishes. The case then has a **View
+investigation** link for both maintainers and viewers.
+
+To start the same flow from the API,
 send `POST /v1/runs/{delivery_id}/investigations` with the maintainer bearer
 token and `{"case_id":"account-closure"}`. The same run and case return the
 same investigation ID on retry.

@@ -1,33 +1,15 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { RunTime, Status } from '../../components';
-import { type Case, type Page, readApi, ReleaseApiError, type RunDetail, type Variant, viewerToken } from '../../../lib/releases';
-
-const evidenceReasons: Record<string, string> = {
-  build_mismatch: 'The endpoint reported a different build.',
-  citation_unverified: 'The citation could not be verified against the case policies.',
-  endpoint_error: 'The endpoint request failed.',
-  endpoint_timeout: 'The endpoint timed out.',
-  invalid_response: 'The endpoint returned an invalid response.',
-  response_too_large: 'The endpoint response exceeded the size limit.',
-  unsupported_encoding: 'The endpoint returned an unsupported encoding.',
-};
-
-function Evidence({ label, variant }: { label: string; variant: Variant }) {
-  return (
-    <div className="evidence">
-      <h3>{label} <Status value={variant.outcome} /></h3>
-      {variant.evidence ? <><code>{variant.evidence.id}</code><blockquote>{variant.evidence.text}</blockquote></> : <p>{evidenceReasons[variant.reason ?? ''] ?? 'No policy evidence recorded.'}</p>}
-    </div>
-  );
-}
+import { startInvestigation } from '../../actions';
+import { Evidence, RunTime, Status } from '../../components';
+import { type Case, type Page, readApi, ReleaseApiError, type RunDetail, viewerToken } from '../../../lib/releases';
 
 export default async function RunPage({ params, searchParams }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ outcome?: string; after?: string }>;
+  searchParams: Promise<{ outcome?: string; after?: string; investigation?: string }>;
 }) {
   const { id } = await params;
-  const { outcome, after } = await searchParams;
+  const { outcome, after, investigation } = await searchParams;
   if (!/^[A-Za-z0-9-]{1,128}$/.test(id)) notFound();
   const token = await viewerToken();
   if (!token) redirect('/');
@@ -57,6 +39,8 @@ export default async function RunPage({ params, searchParams }: {
     <>
       <Link href="/">← Release history</Link>
       <h1>Release evaluation</h1>
+      {investigation === 'access' && <p role="alert">A maintainer token is required to start an investigation.</p>}
+      {investigation === 'unavailable' && <p role="alert">The investigation could not be started. Try again shortly.</p>}
       <p className="commit"><code>{run.commit_sha}</code> <Status value={report ? run.state : 'pending'} /></p>
       <p>Queued <RunTime value={run.created_at} />{report && <> · Completed <RunTime value={run.completed_at} /></>}</p>
       <p className="intro">{run.evaluation_mode === 'build_endpoints' ? 'Build endpoint evaluation' : 'Synthetic evaluation'}</p>
@@ -102,6 +86,11 @@ export default async function RunPage({ params, searchParams }: {
                 <div className="case-heading"><h3>{item.question}</h3>{item.critical && <span className="critical">Critical case</span>}</div>
                 <p>Expected citation <code>{item.required_citation}</code></p>
                 <div className="comparison"><Evidence label="Stable" variant={item.baseline} /><Evidence label="Candidate" variant={item.candidate} /></div>
+                {item.investigation_id ? <p><Link href={`${path}/investigations/${item.investigation_id}`}>View investigation</Link></p> : (
+                  run.can_investigate && item.candidate.outcome === 'fail' && (
+                    <form action={startInvestigation.bind(null, id, item.case_id)}><button className="primary">Investigate</button></form>
+                  )
+                )}
               </article>
             ))}
             <nav aria-label="Case pages" className="page-links">

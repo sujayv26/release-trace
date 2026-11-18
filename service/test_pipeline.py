@@ -142,10 +142,12 @@ class PipelineTest(unittest.TestCase):
                     self.assertIsNone(process_one(engine))
                     result = client.get(run, headers=auth).json()
                     self.assertEqual(result["state"], "completed")
+                    self.assertFalse(result["can_investigate"])
                     self.assertEqual(result["commit_sha"], sha)
                     self.assertEqual(result["report"]["candidate"]["verdict"], "block")
                     investigate = f"{run}/investigations"
                     maintain = {"Authorization": "Bearer maintainer-token"}
+                    self.assertTrue(client.get(run, headers=maintain).json()["can_investigate"])
                     body_case = {"case_id": "account-closure"}
                     self.assertEqual(client.post(investigate, json=body_case, headers=auth).status_code, 403)
                     self.assertEqual(client.post(investigate, json={"case_id": "billing"}, headers=maintain).status_code, 409)
@@ -184,6 +186,7 @@ class PipelineTest(unittest.TestCase):
                     self.assertEqual(len(failures["items"]), 1)
                     failure = failures["items"][0]
                     self.assertTrue(failure["critical"])
+                    self.assertEqual(failure["investigation_id"], investigation_id)
                     self.assertEqual(failure["required_citation"], "account-closure-v2")
                     self.assertEqual(failure["baseline"]["evidence"]["id"], "account-closure-v2")
                     self.assertEqual(failure["candidate"]["evidence"]["id"], "account-closure-v1")

@@ -8,8 +8,12 @@ from demo.release_trace_demo import Config, digest, retrieval_experiment
 from .store import deliveries, investigations
 
 
+def investigation_key(run_id, case_id):
+    return digest([run_id, case_id, "restore_retrieval"])
+
+
 def enqueue_investigation(engine, run_id, case_id):
-    investigation_id = digest([run_id, case_id, "restore_retrieval"])
+    investigation_id = investigation_key(run_id, case_id)
     try:
         with engine.begin() as connection:
             connection.execute(investigations.insert().values(

@@ -20,7 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
 from .evaluate_builds import BuildTargets
-from .investigator import enqueue_investigation
+from .investigator import enqueue_investigation, investigation_key
 from .store import database, deliveries, enqueue, investigations
 
 MAX_BODY = 1024 * 1024
@@ -91,6 +91,7 @@ class CaseComparison(BaseModel):
     critical: bool
     baseline: CaseVariant
     candidate: CaseVariant
+    investigation_id: str | None = None
 
 
 class CasePage(BaseModel):
@@ -191,17 +192,22 @@ def create_app():
     )
     mode = func.coalesce(deliveries.c.inputs["evaluation_mode"].as_string(), "synthetic_fixture").label("evaluation_mode")
 
-    def require_read(request: Request):
+    def is_maintainer(request: Request):
+        if not maintainer_token:
+            return False
         provided = request.headers.get("authorization", "").encode()
-        if maintainer_token and hmac.compare_digest(provided, b"Bearer " + maintainer_token):
+        return hmac.compare_digest(provided, b"Bearer " + maintainer_token)
+
+    def require_read(request: Request):
+        if is_maintainer(request):
             return
+        provided = request.headers.get("authorization", "").encode()
         if not hmac.compare_digest(provided, b"Bearer " + token):
             raise ReadError(401, "unauthorized", "A project read token is required")
 
     def require_maintainer(request: Request):
         require_read(request)
-        provided = request.headers.get("authorization", "").encode()
-        if not maintainer_token or not hmac.compare_digest(provided, b"Bearer " + maintainer_token):
+        if not is_maintainer(request):
             raise ReadError(403, "maintainer_required", "A project maintainer token is required")
 
     def load_run(delivery_id, *columns):
@@ -295,7 +301,7 @@ def create_app():
         return RunPage(items=items, next_cursor=items[-1].id if len(rows) > limit else None)
 
     @app.get("/v1/runs/{delivery_id}", dependencies=[Depends(require_read)])
-    def run_detail(delivery_id: str):
+    def run_detail(delivery_id: str, request: Request):
         result = load_run(
             delivery_id, deliveries.c.id, deliveries.c.commit_sha, deliveries.c.state, deliveries.c.report,
             deliveries.c.created_at, deliveries.c.completed_at, deliveries.c.github_check_id,
@@ -306,6 +312,8 @@ def create_app():
             "created_at": as_utc(result["created_at"]),
             "completed_at": as_utc(result["completed_at"]),
             "github_check_retry_at": as_utc(result["github_check_retry_at"]),
+            "can_investigate": is_maintainer(request) and result["evaluation_mode"] == "synthetic_fixture"
+            and result["state"] == "completed",
         }
 
     @app.get("/v1/runs/{delivery_id}/cases", dependencies=[Depends(require_read)])
@@ -333,8 +341,18 @@ def create_app():
                 baseline=baseline[case_id], candidate=candidate[case_id],
             ))
             if len(items) > limit:
-                return CasePage(state=run["state"], items=items[:limit], next_cursor=items[-2].case_id)
-        return CasePage(state=run["state"], items=items, next_cursor=None)
+                break
+        next_cursor = items[limit - 1].case_id if len(items) > limit else None
+        items = items[:limit]
+        ids = {investigation_key(delivery_id, item.case_id): item for item in items if item.candidate.outcome == "fail"}
+        if ids and report.get("evaluation_mode") != "build_endpoints":
+            with engine.connect() as connection:
+                saved = connection.scalars(select(investigations.c.id).where(
+                    investigations.c.run_id == delivery_id, investigations.c.id.in_(ids),
+                ))
+                for investigation_id in saved:
+                    ids[investigation_id].investigation_id = investigation_id
+        return CasePage(state=run["state"], items=items, next_cursor=next_cursor)
 
     @app.post("/v1/runs/{delivery_id}/investigations", status_code=202, dependencies=[Depends(require_maintainer)])
     def start_investigation(delivery_id: str, body: InvestigationRequest) -> QueuedInvestigation:

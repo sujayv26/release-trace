@@ -60,4 +60,5 @@ td { border-top: 1px solid var(--border); }
 .evidence { background: #f4f6f9; border-radius: .35rem; padding: .85rem; }
 .evidence h3 { margin-bottom: .55rem; }
 .evidence blockquote { margin: .4rem 0 0; color: var(--muted); }
+.investigation-comparison { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: .85rem; }
 @media (max-width: 36rem) { .comparison { grid-template-columns: 1fr; } }

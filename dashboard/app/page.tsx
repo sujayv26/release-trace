@@ -7,11 +7,11 @@ function AccessForm({ error }: { error?: string }) {
   return (
     <section className="panel access-panel">
       <h1>Open release history</h1>
-      <p>Enter your project viewer token to review release evaluations.</p>
-      {error === 'invalid' && <p role="alert">The viewer token was rejected.</p>}
+      <p>Enter your project viewer or maintainer token.</p>
+      {error === 'invalid' && <p role="alert">The access token was rejected.</p>}
       {error === 'unavailable' && <p role="alert">The ReleaseTrace API is unavailable. Try again shortly.</p>}
       <form action={signIn} className="access-form">
-        <label htmlFor="token">Project viewer token</label>
+        <label htmlFor="token">Project access token</label>
         <input id="token" name="token" type="password" required maxLength={512} autoComplete="off" />
         <button className="primary">Open dashboard</button>
       </form>
