@@ -19,6 +19,7 @@ import type { Variant } from '../lib/releases';
 
 
 const evidenceReasons: Record<string, string> = {
+  destination_not_approved: 'The worker refused this evaluation destination.',
   build_mismatch: 'The endpoint reported a different build.',
   citation_unverified: 'The citation could not be verified against the case policies.',
   endpoint_error: 'The endpoint request failed.',

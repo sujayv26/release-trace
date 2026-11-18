@@ -7,6 +7,7 @@ from sqlalchemy import (
     JSON, BigInteger, Column, DateTime, ForeignKey, Index, MetaData, String, Table, create_engine, select, update,
 )
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.engine import make_url
 
 from demo.release_gate import run_suite
 
@@ -86,7 +87,10 @@ project_memberships = Table(
 
 
 def database():
-    return create_engine(os.environ["RELEASETRACE_DATABASE_URL"])
+    url = make_url(os.environ["RELEASETRACE_DATABASE_URL"])
+    if url.drivername in ("postgres", "postgresql"):
+        url = url.set(drivername="postgresql+psycopg")
+    return create_engine(url)
 
 
 def enqueue(engine, delivery_id, repository, installation, sha, inputs):

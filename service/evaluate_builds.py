@@ -5,10 +5,10 @@ import json
 import os
 from pathlib import Path
 from time import monotonic
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx
-from pydantic import BaseModel, HttpUrl, StringConstraints, ValidationError, field_validator
+from pydantic import BaseModel, HttpUrl, StringConstraints, TypeAdapter, ValidationError, field_validator
 
 from demo.release_gate import evaluate_cases, evaluate_suite
 
@@ -18,6 +18,7 @@ RESPONSE_TIMEOUT = 5
 LOOPBACK = {"localhost", "127.0.0.1", "[::1]"}
 CommitSHA = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
+DESTINATIONS = TypeAdapter(dict[str, dict[Literal["baseline", "candidate"], HttpUrl]])
 
 
 class BuildIdentity(BaseModel):
@@ -92,12 +93,15 @@ def score_case(client, target, case, token=None):
     }
 
 
-def evaluate_builds(client, targets, fixture, suite, tokens=None, *, project_evaluation=None):
+def evaluate_builds(client, targets, fixture, suite, tokens=None, *, project_evaluation=None, approved_urls=None):
     by_variant = {"baseline": targets.baseline, "candidate": targets.candidate}
     tokens = tokens or {}
 
     def evaluate_variant(variant, case):
-        return score_case(client, by_variant[variant], case, tokens.get(variant))
+        target = by_variant[variant]
+        if approved_urls is not None and (target.url.scheme != "https" or target.url != approved_urls.get(variant)):
+            return {"outcome": "inconclusive", "citation": None, "evidence": None, "reason": "destination_not_approved"}
+        return score_case(client, target, case, tokens.get(variant))
 
     if project_evaluation is None:
         report = evaluate_suite(fixture, suite, evaluate_variant)
@@ -123,8 +127,17 @@ def evaluate_configured_builds(targets, fixture, suite, *, repository_id=None, p
     suffix = f"_{repository_id}" if repository_id is not None else ""
     tokens = {variant: os.getenv(f"RELEASETRACE_{variant.upper()}_EVALUATION_TOKEN{suffix}")
               for variant in ("baseline", "candidate")}
+    approved_urls = None
+    allowlist = os.getenv("RELEASETRACE_APPROVED_EVALUATION_URLS")
+    if allowlist is not None or os.getenv("RELEASETRACE_REQUIRE_APPROVED_DESTINATIONS") == "1":
+        try:
+            approved_urls = DESTINATIONS.validate_json(allowlist or "{}").get(str(repository_id), {})
+        except ValidationError:
+            # Fail closed without exposing the configuration or sending a request.
+            approved_urls = {}
     with httpx.Client(timeout=RESPONSE_TIMEOUT, follow_redirects=False, trust_env=False) as client:
-        return evaluate_builds(client, targets, fixture, suite, tokens, project_evaluation=project_evaluation)
+        return evaluate_builds(client, targets, fixture, suite, tokens, project_evaluation=project_evaluation,
+                               approved_urls=approved_urls)
 
 
 def main():

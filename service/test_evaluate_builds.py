@@ -1,9 +1,11 @@
 import json
 import unittest
+from contextlib import nullcontext
+from unittest.mock import patch
 
 import httpx
 
-from .evaluate_builds import FIXTURES, BuildTargets, evaluate_builds
+from .evaluate_builds import FIXTURES, BuildTargets, evaluate_builds, evaluate_configured_builds
 
 
 class EvaluateBuildsTest(unittest.TestCase):
@@ -67,3 +69,42 @@ class EvaluateBuildsTest(unittest.TestCase):
         self.assertEqual(report["candidate"]["verdict"], "pass")
         self.assertEqual(report["verdict"], "inconclusive")
         self.assertEqual(report["reason"], "baseline_not_verified")
+
+    def test_restricted_worker_never_contacts_another_projects_destination(self):
+        build_targets = self.targets.model_dump(mode="json")
+        build_targets["baseline"]["url"] = "https://baseline.example.com/evaluate"
+        build_targets["candidate"]["url"] = "https://candidate.example.com/evaluate"
+        targets = BuildTargets.model_validate(build_targets)
+        cases = {case["case_id"]: case for case in [self.fixture, *self.suite["cases"]]}
+        seen = []
+
+        def respond(request):
+            seen.append(str(request.url))
+            variant = "baseline" if str(request.url) == build_targets["baseline"]["url"] else "candidate"
+            case = cases[json.loads(request.content)["case_id"]]
+            return httpx.Response(200, json={
+                "build": build_targets[variant]["build"], "citation": case["required_citation"],
+            })
+
+        allowlist = {
+            "98": {"baseline": build_targets["baseline"]["url"], "candidate": "https://old.example.com/evaluate"},
+            "99": {"candidate": build_targets["candidate"]["url"]},
+        }
+        with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+            with (
+                patch.dict("os.environ", {
+                    "RELEASETRACE_REQUIRE_APPROVED_DESTINATIONS": "1",
+                    "RELEASETRACE_APPROVED_EVALUATION_URLS": json.dumps(allowlist),
+                }) as env,
+                patch("service.evaluate_builds.httpx.Client", return_value=nullcontext(client)),
+            ):
+                report = evaluate_configured_builds(targets, self.fixture, self.suite, repository_id=98)
+                self.assertEqual(report["verdict"], "inconclusive")
+                self.assertEqual(set(seen), {build_targets["baseline"]["url"]})
+                self.assertEqual({item["reason"] for item in report["candidate"]["results"].values()},
+                                 {"destination_not_approved"})
+                seen.clear()
+                del env["RELEASETRACE_APPROVED_EVALUATION_URLS"]
+                report = evaluate_configured_builds(targets, self.fixture, self.suite, repository_id=98)
+                self.assertEqual(report["verdict"], "inconclusive")
+                self.assertEqual(seen, [])

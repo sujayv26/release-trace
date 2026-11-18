@@ -1,9 +1,10 @@
 import hmac
 import json
 import os
+import subprocess
 import tempfile
 import unittest
-from contextlib import ExitStack, nullcontext, redirect_stdout
+from contextlib import ExitStack, nullcontext, redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
@@ -322,6 +323,25 @@ class PipelineTest(unittest.TestCase):
                         completed = json.loads(command_output.getvalue())
                         self.assertEqual(completed["state"], "submitted")
                         self.assertEqual(completed["deployment"]["outcome"], "aborted")
+
+                    argv.extend(("--attested-by", "example/support/.github/workflows/build.yml"))
+                    error_output = StringIO()
+                    with (
+                        patch("staging.promote_approved.httpx.Client", side_effect=lambda **_: nullcontext(client)),
+                        patch("staging.promote_approved.subprocess.check_output", return_value=json.dumps(rollout)) as kubectl,
+                        patch("staging.promote_approved.subprocess.run", side_effect=subprocess.CalledProcessError(1, "gh")) as gh,
+                        patch("sys.argv", argv),
+                        redirect_stdout(command_output),
+                        redirect_stderr(error_output),
+                    ):
+                        with self.assertRaisesRegex(SystemExit, "1"):
+                            promote_approved.main()
+                        self.assertIn("Build provenance verification failed", error_output.getvalue())
+                        self.assertEqual(kubectl.call_count, 1)
+                        self.assertEqual(gh.call_args.args[0], [
+                            "gh", "attestation", "verify", f"oci://{image}", "--repo", "example/support",
+                            "--signer-workflow", "example/support/.github/workflows/build.yml", "--source-digest", sha,
+                        ])
                     self.assertEqual(client.post(deployments_path, headers=auth, json=observation).status_code, 403)
                     retry = client.post(deployments_path, headers=approver, json=observation).raise_for_status()
                     self.assertEqual(retry.json(), completed["deployment"])

@@ -107,7 +107,8 @@ export function historyPath(project: Project) {
 }
 
 export async function readApi<T>(path: string, token: string, body?: object): Promise<T> {
-  const base = process.env.RELEASETRACE_API_URL ?? 'http://127.0.0.1:8000';
+  const host = process.env.RELEASETRACE_API_HOSTPORT;
+  const base = process.env.RELEASETRACE_API_URL ?? (host ? `http://${host}` : 'http://127.0.0.1:8000');
   const response = await fetch(new URL(path, base), {
     method: body ? 'POST' : 'GET',
     body: body ? JSON.stringify(body) : undefined,

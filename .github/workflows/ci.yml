@@ -52,6 +52,23 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r service/requirements.txt
       - run: python -m unittest service.test_pipeline service.test_check_queue service.test_project_evaluation -v
+      - name: Restore release evidence into an isolated database
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          backup="$RUNNER_TEMP/releasetrace-evidence.dump"
+          docker exec "$POSTGRES_CONTAINER" pg_dump -U releasetrace -Fc releasetrace_test > "$backup"
+          docker exec "$POSTGRES_CONTAINER" createdb -U releasetrace releasetrace_restored
+          docker exec -i "$POSTGRES_CONTAINER" pg_restore -U releasetrace --exit-on-error --single-transaction -d releasetrace_restored < "$backup"
+          restored="$(docker exec "$POSTGRES_CONTAINER" psql -XAt -v ON_ERROR_STOP=1 -U releasetrace -d releasetrace_restored -c "
+            SELECT count(*) FROM webhook_deliveries r
+            JOIN approvals a ON a.run_id = r.id
+            JOIN deployments d ON d.run_id = a.run_id AND d.image_digest = a.image_digest
+            WHERE r.id = 'build-passing' AND r.state = 'completed' AND r.report->'candidate'->>'verdict' = 'pass'
+              AND a.decision = 'approve' AND d.outcome = 'aborted';")"
+          test "$restored" = 1
+          echo "Verified one restored run, approval, and matching rollout observation."
   temporal:
     name: Temporal recovery
     runs-on: ubuntu-latest
