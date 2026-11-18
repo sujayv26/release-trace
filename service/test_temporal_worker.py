@@ -50,10 +50,11 @@ class TemporalRecoveryTest(unittest.IsolatedAsyncioTestCase):
                     evaluate(delivery_id)
 
                 queue = f"recovery-test-{uuid4()}"
-                async with await WorkflowEnvironment.start_time_skipping() as environment:
+                async with await WorkflowEnvironment.start_local() as environment:
                     client = environment.client
                     worker_options = {
                         "task_queue": queue, "workflows": [EvaluateRelease], "activity_executor": executor,
+                        "max_cached_workflows": 0,
                     }
                     async with Worker(client, activities=[lose_ack], **worker_options):
                         await dispatch_pending(client, engine, queue)
@@ -65,7 +66,7 @@ class TemporalRecoveryTest(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(original.report["candidate"]["verdict"], "block")
                     async with Worker(client, activities=[retry], **worker_options):
                         handle = client.get_workflow_handle(evaluation_workflow_id(queue, "recover-1"))
-                        await asyncio.wait_for(handle.result(), timeout=20)
+                        await asyncio.wait_for(handle.result(), timeout=45)
                     self.assertEqual(len(retry_attempts), 1)
                     self.assertGreater(retry_attempts[0], 1)
                     with engine.connect() as connection:
