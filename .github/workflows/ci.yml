@@ -23,8 +23,8 @@ jobs:
       - run: python -m unittest discover -s demo -v
       - run: python demo/release_trace_demo.py
       - run: python demo/release_gate.py
-      - run: python -m pip install -r service/requirements.txt httpx
-      - run: python -m unittest service.test_schema service.test_pipeline -v
+      - run: python -m pip install -r service/requirements.txt
+      - run: python -m unittest service.test_schema service.test_pipeline service.test_github_check -v
   postgres:
     name: PostgreSQL integration
     runs-on: ubuntu-latest
@@ -50,7 +50,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install -r service/requirements.txt httpx
+      - run: python -m pip install -r service/requirements.txt
       - run: python -m unittest service.test_pipeline -v
   dashboard:
     name: Dashboard build

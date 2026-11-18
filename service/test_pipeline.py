@@ -11,6 +11,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from .api import create_app
+from .github_check import check_payload, completed_run
 from .schema import upgrade_database
 from .store import database, enqueue, process_one
 
@@ -65,12 +66,22 @@ class PipelineTest(unittest.TestCase):
                     self.assertEqual(client.get(cases, headers=auth).json(), {
                         "state": "queued", "items": [], "next_cursor": None,
                     })
+                    with self.assertRaisesRegex(ValueError, "No completed evaluation"):
+                        completed_run(engine, "delivery-1", 1, 2)
                     self.assertEqual(process_one(engine), "delivery-1")
                     self.assertIsNone(process_one(engine))
                     result = client.get(run, headers=auth).json()
                     self.assertEqual(result["state"], "completed")
                     self.assertEqual(result["commit_sha"], sha)
                     self.assertEqual(result["report"]["candidate"]["verdict"], "block")
+                    with self.assertRaisesRegex(ValueError, "No completed evaluation"):
+                        completed_run(engine, "delivery-1", 1, 3)
+                    check = check_payload(completed_run(engine, "delivery-1", 1, 2))
+                    self.assertEqual(check["head_sha"], sha)
+                    self.assertEqual(check["external_id"], "delivery-1")
+                    self.assertEqual(check["conclusion"], "neutral")
+                    self.assertIn("**block**", check["output"]["summary"])
+                    self.assertIn("account-closure", check["output"]["summary"])
                     created = datetime.fromisoformat(result["created_at"].replace("Z", "+00:00"))
                     completed = datetime.fromisoformat(result["completed_at"].replace("Z", "+00:00"))
                     self.assertEqual(created.utcoffset(), timedelta(0))

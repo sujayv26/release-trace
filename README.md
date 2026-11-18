@@ -64,8 +64,8 @@ Both lists accept `limit` (1 to 100, default 25) and `after`. Pass the returned
 `next_cursor` as `after` to read the next page. Runs are ordered by delivery ID
 and cases by case ID. A queued run returns an empty case list with its state.
 
-For key-free SQLite migration and integration checks, install `httpx` and run
-`python -m unittest service.test_schema service.test_pipeline -v`. The
+For key-free SQLite migration and integration checks, run
+`python -m unittest service.test_schema service.test_pipeline service.test_github_check -v`. The
 PostgreSQL CI job applies the same migrations and runs the pipeline test
 against a fresh PostgreSQL 16 database.
 
@@ -92,3 +92,19 @@ Open [the local dashboard](http://localhost:3000) and enter the API's
 `RELEASETRACE_READ_TOKEN`. Select the sample commit and then **Failed cases** to
 see why the candidate was blocked. The dashboard currently uses one project
 viewer token. Serve the production build over HTTPS for its secure session cookie.
+
+## Preview a GitHub Check
+
+With the same database URL, repository ID, and installation ID used by the API,
+run `python -m service.github_check <delivery_id>` after the worker completes
+the evaluation. The command prints a neutral check for the saved SHA. Its
+summary includes the synthetic gate verdict and any critical failures.
+
+Publishing is a separate, explicit step for a completed delivery from GitHub.
+Configure `RELEASETRACE_GITHUB_REPOSITORY` (`owner/repo`),
+`RELEASETRACE_GITHUB_APP_ID`, and `RELEASETRACE_GITHUB_INSTALLATION_TOKEN` from
+the configured installation with repository **Checks: write** access. Run
+`python -m service.github_check <delivery_id> --publish`. Run publish commands
+for the same delivery serially. A retry first looks for an existing check from
+the app with the same reference. The local seed uses a placeholder SHA and is
+available for preview.
