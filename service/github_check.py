@@ -12,6 +12,8 @@ from .store import database, deliveries
 
 CHECK_NAME = "ReleaseTrace / Synthetic evaluation"
 BUILD_CHECK_NAME = "ReleaseTrace / Build evaluation"
+GITHUB_API = "https://api.github.com"
+GITHUB_HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2026-03-10"}
 REPOSITORY_NAME = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9_.-]{1,100}")
 
 
@@ -108,9 +110,8 @@ def main():
             raise ValueError("The seeded demo uses a placeholder SHA. Publish from a real GitHub delivery.")
         app_id = int(os.environ["RELEASETRACE_GITHUB_APP_ID"])
         token = os.environ["RELEASETRACE_GITHUB_INSTALLATION_TOKEN"]
-        with httpx.Client(base_url="https://api.github.com", timeout=10, headers={
-            "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2026-03-10",
+        with httpx.Client(base_url=GITHUB_API, timeout=10, headers={
+            **GITHUB_HEADERS, "Authorization": f"Bearer {token}",
         }) as client:
             result = publish_check(client, os.environ["RELEASETRACE_GITHUB_REPOSITORY"], repository_id, app_id, payload)
         print(json.dumps(result))

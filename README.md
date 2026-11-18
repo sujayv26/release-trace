@@ -154,4 +154,20 @@ To run the full flow locally, start both demo targets, set
 `RELEASETRACE_BUILD_TARGETS_FILE=demo/build_targets.json` on the API, and start
 the API and worker. Run `python -m service.seed_demo --targets demo/build_targets.json`
 and open the resulting run in the dashboard. Use its delivery ID to preview
-the GitHub Check. Publishing remains an explicit command for a real GitHub delivery.
+the GitHub Check.
+
+### Publish build checks automatically
+
+Run `python -m service.store` to apply the Check tracking migration. Install a
+GitHub App with repository **Checks: write** on the selected repository. In the
+worker environment, set `RELEASETRACE_GITHUB_APP_ID`,
+`RELEASETRACE_GITHUB_REPOSITORY` (`owner/repo`),
+`RELEASETRACE_GITHUB_APP_KEY_FILE` (path to the App's private PEM on the server),
+and the same `RELEASETRACE_REPOSITORY_ID` and `RELEASETRACE_INSTALLATION_ID`
+used by the API. Keep the private key outside the repository.
+
+Start `python -m service.worker --publish-checks`. It publishes completed build
+checks for the configured repository, records the Check ID, and retries
+temporary failures. Earlier completed build deliveries are also eligible.
+Seeded demo deliveries and synthetic fixtures are preview-only in this worker.
+Use the automated publisher or the manual publishing command for a delivery.

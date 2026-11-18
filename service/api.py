@@ -191,7 +191,7 @@ def create_app():
     @app.get("/readyz")
     def readiness():
         with engine.connect() as connection:
-            connection.execute(select(deliveries.c.created_at, deliveries.c.completed_at).limit(1))
+            connection.execute(select(deliveries.c.created_at, deliveries.c.github_check_id).limit(1))
         return {"status": "ready"}
 
     @app.post("/webhooks/github", response_model=Accepted, status_code=202)
@@ -254,12 +254,14 @@ def create_app():
     def run_detail(delivery_id: str):
         result = load_run(
             delivery_id, deliveries.c.id, deliveries.c.commit_sha, deliveries.c.state, deliveries.c.report,
-            deliveries.c.created_at, deliveries.c.completed_at, mode,
+            deliveries.c.created_at, deliveries.c.completed_at, deliveries.c.github_check_id,
+            deliveries.c.github_check_retry_at, mode,
         )
         return {
             **result,
             "created_at": as_utc(result["created_at"]),
             "completed_at": as_utc(result["completed_at"]),
+            "github_check_retry_at": as_utc(result["github_check_retry_at"]),
         }
 
     @app.get("/v1/runs/{delivery_id}/cases", dependencies=[Depends(require_read)])

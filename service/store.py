@@ -25,6 +25,8 @@ deliveries = Table(
     Column("report", JSON),
     Column("created_at", DateTime(timezone=True)),
     Column("completed_at", DateTime(timezone=True)),
+    Column("github_check_id", BigInteger),
+    Column("github_check_retry_at", DateTime(timezone=True)),
     Index("ix_webhook_deliveries_project_history", "repository_id", "installation_id", "id"),
 )
 

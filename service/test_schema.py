@@ -35,8 +35,10 @@ class SchemaTest(unittest.TestCase):
             self.assertEqual(old_run.report, {"candidate": {"verdict": "block"}})
             self.assertIsNone(old_run.created_at)
             self.assertIsNone(old_run.completed_at)
+            self.assertIsNone(old_run.github_check_id)
+            self.assertIsNone(old_run.github_check_retry_at)
             version = connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one()
-            self.assertEqual(version, "0002_delivery_timestamps")
+            self.assertEqual(version, "0003_github_check_delivery")
             indexes = {index["name"] for index in inspect(connection).get_indexes(deliveries.name)}
             self.assertEqual(indexes, {
                 "ix_webhook_deliveries_state", "ix_webhook_deliveries_project_history",
