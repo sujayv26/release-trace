@@ -3,11 +3,21 @@ import { notFound, redirect } from 'next/navigation';
 import { RunTime, Status } from '../../components';
 import { type Case, type Page, readApi, ReleaseApiError, type RunDetail, type Variant, viewerToken } from '../../../lib/releases';
 
+const evidenceReasons: Record<string, string> = {
+  build_mismatch: 'The endpoint reported a different build.',
+  citation_unverified: 'The citation could not be verified against the case policies.',
+  endpoint_error: 'The endpoint request failed.',
+  endpoint_timeout: 'The endpoint timed out.',
+  invalid_response: 'The endpoint returned an invalid response.',
+  response_too_large: 'The endpoint response exceeded the size limit.',
+  unsupported_encoding: 'The endpoint returned an unsupported encoding.',
+};
+
 function Evidence({ label, variant }: { label: string; variant: Variant }) {
   return (
     <div className="evidence">
       <h3>{label} <Status value={variant.outcome} /></h3>
-      {variant.evidence ? <><code>{variant.evidence.id}</code><blockquote>{variant.evidence.text}</blockquote></> : <p>No policy evidence recorded.</p>}
+      {variant.evidence ? <><code>{variant.evidence.id}</code><blockquote>{variant.evidence.text}</blockquote></> : <p>{evidenceReasons[variant.reason ?? ''] ?? 'No policy evidence recorded.'}</p>}
     </div>
   );
 }
@@ -49,9 +59,11 @@ export default async function RunPage({ params, searchParams }: {
       <h1>Release evaluation</h1>
       <p className="commit"><code>{run.commit_sha}</code> <Status value={report ? run.state : 'pending'} /></p>
       <p>Queued <RunTime value={run.created_at} />{report && <> · Completed <RunTime value={run.completed_at} /></>}</p>
-      <p className="intro">Synthetic evaluation</p>
+      <p className="intro">{run.evaluation_mode === 'build_endpoints' ? 'Build endpoint evaluation' : 'Synthetic evaluation'}</p>
       {report ? (
         <>
+          <p>Release gate <Status value={report.verdict ?? report.candidate.verdict} /></p>
+          {report.reason === 'baseline_not_verified' && <p>The stable build did not clear the release gate.</p>}
           <div className="comparison" aria-label="Gate decisions">
             {(['baseline', 'candidate'] as const).map((variant) => (
               <section className="panel result" key={variant}>
@@ -64,7 +76,15 @@ export default async function RunPage({ params, searchParams }: {
           </div>
           <details className="panel provenance">
             <summary>Evaluation provenance</summary>
-            <dl><dt>Dataset digest</dt><dd><code>{report.dataset_digest}</code></dd><dt>Policy digest</dt><dd><code>{report.policy_digest}</code></dd></dl>
+            <dl>
+              <dt>Dataset digest</dt><dd><code>{report.dataset_digest}</code></dd>
+              <dt>Policy digest</dt><dd><code>{report.policy_digest}</code></dd>
+              {report.builds && <>
+                <dt>Stable commit</dt><dd><code>{report.builds.baseline.commit_sha}</code></dd>
+                <dt>Stable image digest</dt><dd><code>{report.builds.baseline.image_digest}</code></dd>
+                <dt>Candidate image digest</dt><dd><code>{report.builds.candidate.image_digest}</code></dd>
+              </>}
+            </dl>
           </details>
           <section aria-labelledby="cases-heading">
             <div className="case-heading">

@@ -37,18 +37,16 @@ export default async function History({ searchParams }: { searchParams: Promise<
   return (
     <>
       <h1>Release history</h1>
-      <p className="intro">Review gate decisions and evidence from synthetic evaluations.</p>
       {page.items.length === 0 ? <p className="panel">No evaluations on this page.</p> : (
         <div className="panel table-scroll" tabIndex={0} role="region" aria-label="Release evaluations">
           <table>
-            <thead><tr><th scope="col">Commit</th><th scope="col">Queued at</th><th scope="col">Evaluation</th><th scope="col">Stable</th><th scope="col">Candidate</th></tr></thead>
+            <thead><tr><th scope="col">Commit</th><th scope="col">Queued at</th><th scope="col">Evaluation</th><th scope="col">Gate</th></tr></thead>
             <tbody>{page.items.map((run) => (
               <tr key={run.id}>
                 <td><Link href={`/runs/${encodeURIComponent(run.id)}`} aria-label={`Review commit ${run.commit_sha}, delivery ${run.id}`}><code>{run.commit_sha.slice(0, 12)}</code></Link></td>
                 <td><RunTime value={run.created_at} /></td>
-                <td><Status value={run.state} /></td>
-                <td><Status value={run.baseline_verdict} /></td>
-                <td><Status value={run.candidate_verdict} /></td>
+                <td>{run.evaluation_mode === 'build_endpoints' ? 'Build endpoints' : 'Synthetic fixtures'}</td>
+                <td><Status value={run.verdict} /></td>
               </tr>
             ))}</tbody>
           </table>

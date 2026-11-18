@@ -2,6 +2,7 @@ import 'server-only';
 import { cookies } from 'next/headers';
 
 export const accessCookie = 'releasetrace-viewer';
+type EvaluationMode = 'synthetic_fixture' | 'build_endpoints';
 
 export type Run = {
   id: string;
@@ -9,11 +10,13 @@ export type Run = {
   state: string;
   baseline_verdict: string | null;
   candidate_verdict: string | null;
+  verdict: string | null;
+  evaluation_mode: EvaluationMode;
   created_at: string | null;
 };
 
 type Evidence = { id: string; revision: number; text: string };
-export type Variant = { outcome: string; citation: string | null; evidence: Evidence | null };
+export type Variant = { outcome: string; citation: string | null; evidence: Evidence | null; reason?: string | null };
 export type Case = {
   case_id: string;
   question: string;
@@ -24,13 +27,24 @@ export type Case = {
 };
 
 type Gate = { verdict: string; score: number; critical_failures: string[] };
+type Build = { commit_sha: string; image_digest: string };
+type Report = {
+  baseline: Gate;
+  candidate: Gate;
+  dataset_digest: string;
+  policy_digest: string;
+  verdict?: string;
+  reason?: string | null;
+  builds?: Record<'baseline' | 'candidate', Build>;
+};
 export type RunDetail = {
   id: string;
   commit_sha: string;
   state: string;
   created_at: string | null;
   completed_at: string | null;
-  report: { baseline: Gate; candidate: Gate; dataset_digest: string; policy_digest: string } | null;
+  evaluation_mode: EvaluationMode;
+  report: Report | null;
 };
 
 export type Page<T> = { items: T[]; next_cursor: string | null };

@@ -97,8 +97,8 @@ viewer token. Serve the production build over HTTPS for its secure session cooki
 
 With the same database URL, repository ID, and installation ID used by the API,
 run `python -m service.github_check <delivery_id>` after the worker completes
-the evaluation. The command prints a neutral check for the saved SHA. Its
-summary includes the synthetic gate verdict and any critical failures.
+the evaluation. Fixture checks are neutral. Build checks report success after
+a passing gate and failure after a blocked or inconclusive gate.
 
 Publishing is a separate, explicit step for a completed delivery from GitHub.
 Configure `RELEASETRACE_GITHUB_REPOSITORY` (`owner/repo`),
@@ -141,3 +141,17 @@ with the configured values. Remote endpoints use HTTPS, and optional bearer
 tokens come from `RELEASETRACE_BASELINE_EVALUATION_TOKEN` and
 `RELEASETRACE_CANDIDATE_EVALUATION_TOKEN`. This path runs from the CLI and writes
 the report to standard output.
+
+### Run build evaluations from GitHub pushes
+
+Set `RELEASETRACE_BUILD_TARGETS_FILE` on the API to the target file and restart
+the API when the build pair changes. The candidate must be deployed and its
+commit SHA must match the signed push. The API snapshots the build pair with
+the job. In this mode, pushes for other commits are ignored. Optional tokens
+belong in the worker's environment. Scope them to their respective endpoints.
+
+To run the full flow locally, start both demo targets, set
+`RELEASETRACE_BUILD_TARGETS_FILE=demo/build_targets.json` on the API, and start
+the API and worker. Run `python -m service.seed_demo --targets demo/build_targets.json`
+and open the resulting run in the dashboard. Use its delivery ID to preview
+the GitHub Check. Publishing remains an explicit command for a real GitHub delivery.
