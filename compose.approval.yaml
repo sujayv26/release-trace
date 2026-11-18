@@ -1,0 +1,31 @@
+x-target: &target
+  build:
+    context: .
+    dockerfile: service/Dockerfile
+  init: true
+  network_mode: service:worker
+
+services:
+  api:
+    environment:
+      RELEASETRACE_BUILD_TARGETS_FILE: /app/demo/passing_build_targets.json
+      RELEASETRACE_APPROVER_TOKEN: ${RELEASETRACE_APPROVER_TOKEN:-demo-approver-token}
+      RELEASETRACE_APPROVER_ACTOR: ${RELEASETRACE_APPROVER_ACTOR:-Demo release reviewer}
+
+  baseline:
+    <<: *target
+    command: [python, -m, demo.build_target, baseline, --targets, demo/passing_build_targets.json]
+    healthcheck:
+      test: [CMD, python, -c, "from urllib.request import urlopen; urlopen('http://127.0.0.1:8101/healthz', timeout=2).close()"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  candidate:
+    <<: *target
+    command: [python, -m, demo.build_target, candidate, --targets, demo/passing_build_targets.json, --fixed]
+    healthcheck:
+      test: [CMD, python, -c, "from urllib.request import urlopen; urlopen('http://127.0.0.1:8102/healthz', timeout=2).close()"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

@@ -23,14 +23,21 @@ class Question(BaseModel):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("variant", choices=("baseline", "candidate"))
-    variant = parser.parse_args().variant
-    targets = BuildTargets.model_validate_json((DIRECTORY / "build_targets.json").read_bytes())
+    parser.add_argument("--targets", type=Path, default=DIRECTORY / "build_targets.json")
+    parser.add_argument("--fixed", action="store_true", help="Serve the corrected retrieval setting")
+    args = parser.parse_args()
+    variant = args.variant
+    targets = BuildTargets.model_validate_json(args.targets.read_bytes())
     target = getattr(targets, variant)
     fixture = json.loads((DIRECTORY / "fixture.json").read_text(encoding="utf-8"))
     suite = json.loads((DIRECTORY / "gate_suite.json").read_text(encoding="utf-8"))
     cases = {case["case_id"]: case for case in [fixture, *suite["cases"]]}
-    config = Config(**fixture[variant])
+    config = Config(**fixture["baseline" if args.fixed else variant])
     app = FastAPI()
+
+    @app.get("/healthz")
+    def health():
+        return {"status": "ok"}
 
     @app.post("/evaluate")
     def answer(question: Question) -> Answer:

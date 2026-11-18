@@ -33,6 +33,32 @@ and `service/requirements.compose.lock`. To refresh the Python lock after a
 dependency change, run `uv pip compile service/requirements.txt --universal
 --python-version 3.12 --no-header --output-file service/requirements.compose.lock`.
 
+### Continue the demo from investigation to approval
+
+After reviewing the blocked run above, start the passing-build targets and
+submit their signed push. Compose keeps the investigation and run history in
+the same database.
+
+```bash
+docker compose -f compose.yaml -f compose.approval.yaml up --build --wait --wait-timeout 90
+docker compose -f compose.yaml -f compose.approval.yaml exec -T api python -m service.seed_demo --targets demo/passing_build_targets.json
+```
+
+Sign out of the dashboard and sign in with `demo-approver-token`. Open the
+build whose commit starts with `3333333`, wait for the passing gate, and click
+**Approve candidate**. The saved decision identifies the evaluated demo
+digest and reviewer. The targets use synthetic build identities.
+
+To verify the workflow automatically, run
+`docker compose -f compose.yaml -f compose.approval.yaml exec -T api python -m service.smoke_approval`.
+The smoke records the approval itself. For a manual walkthrough, click
+**Approve candidate** before running the smoke.
+
+Stop the complete demo with
+`docker compose -f compose.yaml -f compose.approval.yaml down`. After restarting
+the base stack, the blocked fixture and its investigation remain in the
+dashboard, along with the passing build and its saved decision.
+
 ## Run the first milestone locally
 
 Requires Python 3.10 or later. The demo runs without external dependencies or credentials.
