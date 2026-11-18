@@ -3,29 +3,32 @@ import json
 import os
 import tempfile
 import unittest
+from contextlib import ExitStack
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from .api import create_app
-from .store import database, enqueue, metadata, process_one
+from .schema import upgrade_database
+from .store import database, enqueue, process_one
 
 
 class PipelineTest(unittest.TestCase):
     def test_signed_delivery_produces_one_scoped_report(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as cleanup:
             db_path = Path(directory, "releases.db").as_posix()
             with patch.dict(os.environ, {
-                "RELEASETRACE_DATABASE_URL": f"sqlite:///{db_path}",
+                "RELEASETRACE_DATABASE_URL": os.getenv("RELEASETRACE_TEST_DATABASE_URL", f"sqlite:///{db_path}"),
                 "RELEASETRACE_WEBHOOK_SECRET": "test-secret",
                 "RELEASETRACE_READ_TOKEN": "test-token",
                 "RELEASETRACE_REPOSITORY_ID": "1",
                 "RELEASETRACE_INSTALLATION_ID": "2",
             }):
                 engine = database()
-                self.addCleanup(engine.dispose)
-                metadata.create_all(engine)
+                cleanup.callback(engine.dispose)
+                upgrade_database(engine)
                 with TestClient(create_app()) as client:
                     self.assertEqual(client.get("/readyz").status_code, 200)
                     sha = "a" * 40
@@ -68,6 +71,11 @@ class PipelineTest(unittest.TestCase):
                     self.assertEqual(result["state"], "completed")
                     self.assertEqual(result["commit_sha"], sha)
                     self.assertEqual(result["report"]["candidate"]["verdict"], "block")
+                    created = datetime.fromisoformat(result["created_at"].replace("Z", "+00:00"))
+                    completed = datetime.fromisoformat(result["completed_at"].replace("Z", "+00:00"))
+                    self.assertEqual(created.utcoffset(), timedelta(0))
+                    self.assertEqual(completed.utcoffset(), timedelta(0))
+                    self.assertGreaterEqual(completed, created)
 
                     failures = client.get(cases, params={"outcome": "fail"}, headers=auth).json()
                     self.assertEqual(len(failures["items"]), 1)
@@ -89,6 +97,8 @@ class PipelineTest(unittest.TestCase):
                     first = client.get(history, params={"limit": 1}, headers=auth).json()
                     self.assertEqual(first["next_cursor"], "delivery-1")
                     self.assertEqual(first["items"][0]["candidate_verdict"], "block")
+                    saved_timestamp = datetime.fromisoformat(first["items"][0]["created_at"].replace("Z", "+00:00"))
+                    self.assertEqual(saved_timestamp, created)
                     rest = client.get(history, params={"after": first["next_cursor"]}, headers=auth).json()
                     self.assertEqual([item["id"] for item in rest["items"]], ["delivery-2"])
                     self.assertIsNone(rest["items"][0]["candidate_verdict"])
@@ -96,4 +106,3 @@ class PipelineTest(unittest.TestCase):
                     self.assertEqual(client.get("/v1/projects/2/runs", headers=auth).status_code, 404)
                     self.assertEqual(client.get("/v1/runs/delivery-3/cases", headers=auth).status_code, 404)
                     self.assertEqual(client.get(history, params={"limit": 101}, headers=auth).status_code, 422)
-                engine.dispose()

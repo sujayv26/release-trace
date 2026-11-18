@@ -44,6 +44,10 @@ python -m service.store
 python -m uvicorn service.api:create_app --factory
 ```
 
+Run `python -m service.store` before starting an updated API or worker. It
+applies pending Alembic migrations and preserves existing demo runs. Runs
+saved before timestamp tracking show their original times as unavailable.
+
 In the second terminal, run `python -m service.worker`. A signed GitHub App
 branch push to `/webhooks/github` queues one job per delivery ID. Read its state
 and evidence at `/v1/runs/{delivery_id}` with the configured bearer token. The
@@ -60,8 +64,10 @@ Both lists accept `limit` (1 to 100, default 25) and `after`. Pass the returned
 `next_cursor` as `after` to read the next page. Runs are ordered by delivery ID
 and cases by case ID. A queued run returns an empty case list with its state.
 
-For a key-free integration check, install `httpx` and run
-`python -m unittest service.test_pipeline -v`.
+For key-free SQLite migration and integration checks, install `httpx` and run
+`python -m unittest service.test_schema service.test_pipeline -v`. The
+PostgreSQL CI job applies the same migrations and runs the pipeline test
+against a fresh PostgreSQL 16 database.
 
 ## Review a release in the dashboard
 

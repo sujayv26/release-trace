@@ -6,6 +6,7 @@ import logging
 import os
 import re
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Literal
 from uuid import uuid4
@@ -55,6 +56,7 @@ class RunSummary(BaseModel):
     state: str
     baseline_verdict: Verdict | None
     candidate_verdict: Verdict | None
+    created_at: datetime | None
     evaluation_mode: Literal["synthetic_fixture"] = "synthetic_fixture"
 
 
@@ -103,6 +105,15 @@ def error(status, code, message, request_id):
     return JSONResponse(status_code=status, content={
         "code": code, "message": message, "request_id": request_id,
     })
+
+
+def as_utc(value: datetime | None) -> datetime | None:
+    # SQLite drops offsets on storage, while PostgreSQL returns aware values.
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def create_app():
@@ -166,7 +177,7 @@ def create_app():
     @app.get("/readyz")
     def readiness():
         with engine.connect() as connection:
-            connection.execute(select(deliveries.c.id).limit(1))
+            connection.execute(select(deliveries.c.created_at, deliveries.c.completed_at).limit(1))
         return {"status": "ready"}
 
     @app.post("/webhooks/github", response_model=Accepted, status_code=202)
@@ -207,7 +218,7 @@ def create_app():
         if project_id != repository:
             raise ReadError(404, "project_missing", "Project was not found")
         query = select(
-            deliveries.c.id, deliveries.c.commit_sha, deliveries.c.state,
+            deliveries.c.id, deliveries.c.commit_sha, deliveries.c.state, deliveries.c.created_at,
             deliveries.c.report["baseline"]["verdict"].as_string().label("baseline_verdict"),
             deliveries.c.report["candidate"]["verdict"].as_string().label("candidate_verdict"),
         ).where(*scope)
@@ -217,15 +228,21 @@ def create_app():
             query = query.where(deliveries.c.id > after)
         with engine.connect() as connection:
             rows = connection.execute(query.order_by(deliveries.c.id).limit(limit + 1)).mappings().all()
-        items = [RunSummary(**row) for row in rows[:limit]]
+        items = [RunSummary(**{**row, "created_at": as_utc(row["created_at"])}) for row in rows[:limit]]
         return RunPage(items=items, next_cursor=items[-1].id if len(rows) > limit else None)
 
     @app.get("/v1/runs/{delivery_id}", dependencies=[Depends(require_read)])
     def run_detail(delivery_id: str):
         result = load_run(
             delivery_id, deliveries.c.id, deliveries.c.commit_sha, deliveries.c.state, deliveries.c.report,
+            deliveries.c.created_at, deliveries.c.completed_at,
         )
-        return {**result, "evaluation_mode": "synthetic_fixture"}
+        return {
+            **result,
+            "created_at": as_utc(result["created_at"]),
+            "completed_at": as_utc(result["completed_at"]),
+            "evaluation_mode": "synthetic_fixture",
+        }
 
     @app.get("/v1/runs/{delivery_id}/cases", dependencies=[Depends(require_read)])
     def run_cases(
