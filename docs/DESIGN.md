@@ -5,9 +5,11 @@ Use a compact engineering dashboard with neutral surfaces, readable typography, 
 | Screen | Information and actions |
 |---|---|
 | Release history | Commit, evaluation status, gate, candidate and timestamp |
-| Run detail | Baseline and candidate summaries, critical cases, provenance and rollout status |
-| Case detail | Expected policy, both outputs, evidence links and Investigate action |
-| Investigation | Hypothesis, changed setting, observed result, uncertainty and suggested next check |
-| Approval | Candidate digest and gate evidence, reviewer decision and stale-candidate feedback |
+| Run detail | Stable and candidate summaries, critical cases, build provenance, GitHub Check status, and saved release decision |
+| Case results | Expected citation, both variants, policy evidence, and the maintainer's Investigate action for failed synthetic cases |
+| Investigation | Supported or inconclusive outcome, reason, changed setting, and observed citation |
+| Approval | Candidate digest, gate evidence, actions for the approver, and saved reviewer and timestamp |
+
+Rollout measurements currently appear in the [canary drill artifact](../README.md#verification-and-rollout-evidence). Displaying deployment state on the run page is future work.
 
 Use keyboard-accessible controls and visible focus. Distinguish pending, empty, failed and inconclusive states. Keep prior evidence visible during a retry and show absent metrics explicitly.

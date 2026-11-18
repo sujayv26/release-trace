@@ -1,5 +1,5 @@
 # ReleaseTrace
-## Experimental diagnosis agent · Codex build guide
+## Investigator design and benchmark
 
 ReleaseTrace is the platform. **Investigator** is the feature reviewers use to examine a failed case through a controlled rerun. See the [implementation plan](IMPLEMENTATION_PLAN.md) for platform milestones and the [README](../README.md) for the runnable demo.
 
@@ -28,7 +28,7 @@ LangGraph runs the local investigation with a scripted planner and a budget of o
 
 ## 2. Stack and module boundaries
 
-Use Python, FastAPI, Pydantic, SQLAlchemy, Alembic, and the existing `unittest` suite for the current implementation. Add LangGraph and a provider adapter after the controlled workflow is stable. Use a scripted adapter for deterministic graph tests. Temporal can coordinate the enclosing release workflow later.
+FastAPI and Pydantic expose the investigation API. SQLAlchemy and Alembic persist work and results. LangGraph runs the scripted planner for the dashboard workflow. The benchmark CLI provides the optional hosted model adapter. Temporal can run release evaluations while the standard worker handles investigations.
 
 | Module | Responsibility |
 |---|---|
@@ -40,11 +40,11 @@ Use Python, FastAPI, Pydantic, SQLAlchemy, Alembic, and the existing `unittest` 
 | [`dashboard/app/runs/`](../dashboard/app/runs/) | Open the failed case and compare investigation evidence |
 | [`service/test_investigator.py`](../service/test_investigator.py) and [`service/test_pipeline.py`](../service/test_pipeline.py) | Diagnosis, abstention, access, and retry checks |
 
-Follow the existing module layout if implementation has begun. Share schemas and reuse evaluation scoring across initial runs and experiments.
+Initial runs and controlled experiments share the fixture scorer.
 
 ## 3. Contracts and boundaries
 
-These are target contracts for the multi-experiment investigator. The current API accepts a saved run ID and failed case ID. The worker reads the pinned inputs of that run and records one result per case and intervention.
+The current API accepts a saved synthetic run ID and failed case ID. The worker reads the pinned inputs and records one investigation per run and case. Reports are **supported** or **inconclusive** and can include one experiment. The table describes proposed contracts for a multi-experiment investigator.
 
 | Object | Required fields |
 |---|---|
@@ -54,9 +54,9 @@ These are target contracts for the multi-experiment investigator. The current AP
 | ExperimentResult | Experiment ID, full version manifest, changed parameter, trial counts and outcomes, scorer outputs, evidence IDs and execution status |
 | DiagnosisReport | Outcome, hypothesis, evidence IDs, experiment results, uncertainty, and recommended next check |
 
-Use outcomes **supported**, **inconclusive**, and **investigation_failed**. A tool timeout or missing required data must be visible in the report. Enforce project and case scope at service and tool boundaries. Treat traces and retrieved text as input data. Restrict tool access to evidence reads and evaluator requests. Keep deploy credentials and production actions outside the agent runtime.
+For the proposed multi-experiment workflow, expose tool timeouts and missing data in the report. Enforce project and case scope at service and tool boundaries. Treat traces and retrieved text as input data. Restrict tool access to evidence reads and evaluator requests. Keep deploy credentials and production actions outside the agent runtime.
 
-## 4. Graph and tool behavior
+## 4. Proposed multi-experiment graph
 
 ```mermaid
 flowchart TD
@@ -74,9 +74,9 @@ flowchart TD
 | compare_release_config | Return supported differences in model, prompt, retrieval, or tool configuration with artifact IDs |
 | run_controlled_experiment | Run a single allowlisted intervention against the pinned candidate in fixture or staging mode |
 
-Start with three interventions: restore the baseline prompt, restore the baseline retrieval configuration, and replay a recorded baseline tool response. The tool response uses a fake integration. Report whether the experiment isolates a suspected cause or merely bypasses the failure.
+The current fixture graph can restore the baseline prompt or retrieval configuration, or replay a recorded baseline tool response. The tool response uses a fake integration. The proposed graph would distinguish an isolated cause from a workaround.
 
-Set a server-enforced default limit of three experiments, a finite graph step count, a wall-clock timeout, and a per-run model budget. Deduplicate the same canonical intervention under retries, including case and artifact identity in the key. Count repeated trials explicitly. Never interpret a missing result as a passing run.
+Any larger experiment budget should remain server-enforced, with bounded graph steps, wall-clock time, and model usage. Deduplicate interventions under retries using case and artifact identity. Count repeated trials explicitly and require evidence for a passing result.
 
 When candidate behavior is stochastic, record repeats for both candidate and intervention where feasible. Two variables may interact, so a successful swap supports a hypothesis under the tested conditions. Preserve contradictory evidence and abstain when the finding is weak or ambiguous. Validate report citations against evidence captured in the current run.
 
@@ -99,11 +99,9 @@ On `synthetic-holdout-v1`, both methods correctly diagnosed three of four diagno
 | 1. Reproduce a failure | Complete. The fixture scorer and retrieval swap run locally. | One intervention restores the expected citation. The rerun changes only retrieval. |
 | 2. Connect the controlled rerun | Complete for synthetic runs. Queue requests, persist results, and compare them in the dashboard. | Maintainer requests deduplicate. Viewers can read the saved report. The original gate remains intact. |
 | 3. Build the graph | Complete for the three local interventions. | The scripted planner handles supported and inconclusive cases. The graph rejects unavailable interventions and stops at its budget. |
-| 4. Measure it | Add the hosted model adapter and compare all three methods on held-out cases. | The report includes actual results, costs where measurable, denominators, and error analysis. |
-| 5. Finish the flagship demo | Connect deployment-backed investigation and exercise staged rollout. | A reviewer can trace a failed check to a diagnosis and inspect a recorded canary abort drill. |
+| 4. Measure it | Offline results are available. The optional hosted adapter is implemented. | Collect hosted results and analyze diagnosis errors, abstentions, token usage, and latency. |
+| 5. Connect real build evidence | The separate canary drill has recorded an abort. Deployment-backed investigations are planned. | A reviewer can trace a live failed check to a diagnosis backed by a controlled rerun. |
 
 ## 7. Next implementation step
 
-```text
-Use the frozen holdout as the first input to a one-shot model and a tool-using model. Report diagnosis errors, abstentions, and per-case model usage. Preserve the existing investigation API and independent release verdict.
-```
+Run the optional hosted benchmark on the frozen holdout and record the selected model, per-case outcomes, usage, and failure modes. See the [benchmark commands](OPERATIONS.md#measure-the-investigator-locally).
