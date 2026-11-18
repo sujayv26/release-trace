@@ -108,3 +108,36 @@ the configured installation with repository **Checks: write** access. Run
 for the same delivery serially. A retry first looks for an existing check from
 the app with the same reference. The local seed uses a placeholder SHA and is
 available for preview.
+
+## Evaluate two running builds
+
+The endpoint evaluator calls both builds with the same checked-in test cases
+and prints a JSON report with dataset, policy, and build fingerprints. For a
+key-free demonstration, start each target in a separate terminal after
+installing `service/requirements.txt`:
+
+```bash
+python -m demo.build_target baseline
+python -m demo.build_target candidate
+```
+
+In a third terminal, run:
+
+```bash
+python -m service.evaluate_builds demo/build_targets.json
+```
+
+The candidate still passes 80% of the cases. Its wrong account-closure citation
+blocks the release. Exit codes are `0` for pass, `1` for block, and `2` for an
+inconclusive run or invalid command configuration.
+
+For your own builds, use the same [target file shape](demo/build_targets.json)
+and point to each build's evaluation endpoint. Each endpoint accepts a JSON
+`POST` body with `case_id` and `question` and returns
+`{"build":{"commit_sha":"…","image_digest":"sha256:…"},"citation":"…"}`.
+Return `null` when there is no citation. Populate build identity from trusted
+deployment metadata. ReleaseTrace compares the endpoint's reported identity
+with the configured values. Remote endpoints use HTTPS, and optional bearer
+tokens come from `RELEASETRACE_BASELINE_EVALUATION_TOKEN` and
+`RELEASETRACE_CANDIDATE_EVALUATION_TOKEN`. This path runs from the CLI and writes
+the report to standard output.

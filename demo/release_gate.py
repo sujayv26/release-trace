@@ -40,7 +40,7 @@ def apply_gate(requirements, results, minimum_score):
     }
 
 
-def run_suite(fixture, suite):
+def evaluate_suite(fixture, suite, evaluate_variant):
     requirements = {
         item["case_id"]: item["critical"]
         for item in [fixture, *suite["cases"]]
@@ -52,13 +52,17 @@ def run_suite(fixture, suite):
         "requirements": requirements, "minimum_score": suite["minimum_score"],
     })}
     for variant in ("baseline", "candidate"):
-        config = Config(**fixture[variant])
-        results = {case["case_id"]: evaluate(case, config) for case in cases}
+        results = {case["case_id"]: evaluate_variant(variant, case) for case in cases}
         report[variant] = {
             "results": results,
             **apply_gate(requirements, results, suite["minimum_score"]),
         }
     return report
+
+
+def run_suite(fixture, suite):
+    configs = {variant: Config(**fixture[variant]) for variant in ("baseline", "candidate")}
+    return evaluate_suite(fixture, suite, lambda variant, case: evaluate(case, configs[variant]))
 
 
 if __name__ == "__main__":

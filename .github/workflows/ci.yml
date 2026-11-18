@@ -24,7 +24,7 @@ jobs:
       - run: python demo/release_trace_demo.py
       - run: python demo/release_gate.py
       - run: python -m pip install -r service/requirements.txt
-      - run: python -m unittest service.test_schema service.test_pipeline service.test_github_check -v
+      - run: python -m unittest service.test_schema service.test_pipeline service.test_github_check service.test_evaluate_builds -v
   postgres:
     name: PostgreSQL integration
     runs-on: ubuntu-latest
