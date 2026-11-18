@@ -1,0 +1,80 @@
+name: releasetrace
+
+x-service: &service
+  build:
+    context: .
+    dockerfile: service/Dockerfile
+  init: true
+  environment: &database-env
+    RELEASETRACE_DATABASE_URL: postgresql+psycopg://releasetrace:local-demo-password@db:5432/releasetrace
+
+services:
+  db:
+    image: postgres:16-bookworm@sha256:a49f7438ba03589f9b1ca062f2da82e899b48ea1dc50d2449fa09a70be83ebca
+    environment:
+      POSTGRES_USER: releasetrace
+      POSTGRES_PASSWORD: local-demo-password
+      POSTGRES_DB: releasetrace
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, releasetrace, -d, releasetrace]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    <<: *service
+    command: [python, -m, service.store]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *service
+    environment:
+      <<: *database-env
+      RELEASETRACE_WEBHOOK_SECRET: ${RELEASETRACE_WEBHOOK_SECRET:-demo-webhook-secret}
+      RELEASETRACE_READ_TOKEN: ${RELEASETRACE_READ_TOKEN:-demo-viewer-token}
+      RELEASETRACE_MAINTAINER_TOKEN: ${RELEASETRACE_MAINTAINER_TOKEN:-demo-maintainer-token}
+      RELEASETRACE_REPOSITORY_ID: "1"
+      RELEASETRACE_INSTALLATION_ID: "2"
+    ports:
+      - "127.0.0.1:${RELEASETRACE_API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -c, "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/readyz', timeout=2).close()"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  worker:
+    <<: *service
+    command: [python, -m, service.worker]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  dashboard:
+    init: true
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    environment:
+      RELEASETRACE_API_URL: http://api:8000
+      RELEASETRACE_REPOSITORY_ID: "1"
+    ports:
+      - "127.0.0.1:${RELEASETRACE_DASHBOARD_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  postgres-data:

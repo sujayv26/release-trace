@@ -1,0 +1,12 @@
+**/.git
+**/.env*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/__pycache__
+**/*.py[cod]
+**/.venv
+**/node_modules
+**/.next
+**/*.tsbuildinfo
