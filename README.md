@@ -27,3 +27,38 @@ release. Missing required evidence prevents promotion.
 
 Develop on `develop` and review changes through a pull request to `main`.
 GitHub Actions runs Python compilation, unit tests and both local demos.
+
+## Run the webhook and worker
+
+This Phase 3 service evaluates the checked-in synthetic fixture suite. It stores
+the push commit SHA as event provenance and labels the result `synthetic_fixture`.
+
+Install `service/requirements.txt`. Set the same `RELEASETRACE_DATABASE_URL` in
+both terminals, using an absolute `sqlite:///` database URL for a local demo or
+a `postgresql+psycopg://` URL for PostgreSQL. For the API, set
+`RELEASETRACE_WEBHOOK_SECRET`, `RELEASETRACE_READ_TOKEN`,
+`RELEASETRACE_REPOSITORY_ID`, and `RELEASETRACE_INSTALLATION_ID`.
+
+```bash
+python -m service.store
+python -m uvicorn service.api:create_app --factory
+```
+
+In the second terminal, run `python -m service.worker`. A signed GitHub App
+branch push to `/webhooks/github` queues one job per delivery ID. Read its state
+and evidence at `/v1/runs/{delivery_id}` with the configured bearer token. The
+API exposes `/healthz` and `/readyz`.
+
+Use the same bearer token for these reviewer endpoints:
+
+- `GET /v1/projects/{repository_id}/runs` lists commits, run states, and gate verdicts.
+- `GET /v1/runs/{delivery_id}/cases?outcome=fail` lists failed candidate cases
+  with the expected citation and evidence from both versions. Omit `outcome`
+  to see every case.
+
+Both lists accept `limit` (1 to 100, default 25) and `after`. Pass the returned
+`next_cursor` as `after` to read the next page. Runs are ordered by delivery ID
+and cases by case ID. A queued run returns an empty case list with its state.
+
+For a key-free integration check, install `httpx` and run
+`python -m unittest service.test_pipeline -v`.

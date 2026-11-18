@@ -23,3 +23,5 @@ jobs:
       - run: python -m unittest discover -s demo -v
       - run: python demo/release_trace_demo.py
       - run: python demo/release_gate.py
+      - run: python -m pip install -r service/requirements.txt httpx
+      - run: python -m unittest service.test_pipeline -v
