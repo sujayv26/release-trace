@@ -2,11 +2,13 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
+import httpx
+
 from demo.release_gate import run_suite
 from demo.release_trace_demo import Config, INTERVENTIONS, controlled_experiment, evaluate
 
 from .evaluate_builds import FIXTURES
-from .investigation_benchmark import benchmark
+from .investigation_benchmark import benchmark, openai_choice
 from .investigator import investigate
 
 
@@ -87,3 +89,33 @@ class InvestigatorTest(unittest.TestCase):
         self.assertEqual((rule["correct_diagnoses"], rule["incorrect_diagnoses"], rule["correct_abstentions"]), (3, 1, 1))
         self.assertEqual((graph["correct_diagnoses"], graph["incorrect_diagnoses"], graph["correct_abstentions"]), (3, 0, 2))
         self.assertEqual((graph["diagnosable"], graph["abstentions"], graph["experiments"]), (4, 3, 4))
+
+    def test_model_comparison_uses_same_evidence_and_validates_the_rerun(self):
+        dataset = json.loads((FIXTURES / "investigation_holdout.json").read_bytes())
+        entry = next(entry for entry in dataset["cases"] if entry["fixture"]["case_id"] == "download-tax-form")
+        evidence = []
+
+        def respond(request):
+            payload = json.loads(request.content)
+            evidence.append(json.loads(payload["messages"][1]["content"]))
+            return httpx.Response(200, json={
+                "model": "test-model",
+                "choices": [{"finish_reason": "stop", "message": {
+                    "content": json.dumps({"choice": evidence[-1]["available_interventions"][0]}),
+                }}],
+                "usage": {"prompt_tokens": 50, "completion_tokens": 8},
+            })
+
+        with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+            report = benchmark({**dataset, "cases": [entry]}, choose_model=lambda data, can_rerun: openai_choice(
+                client, "test-model", data, can_rerun=can_rerun,
+            ))
+        self.assertEqual(len(evidence), 2)
+        self.assertEqual(evidence[0], evidence[1])
+        self.assertNotIn("expected", evidence[0])
+        self.assertEqual(report["methods"]["one_shot_model"]["incorrect_diagnoses"], 1)
+        self.assertEqual(report["methods"]["experiment_model"]["correct_abstentions"], 1)
+        result = report["cases"][0]["experiment_model"]
+        self.assertEqual(result["reason"], "rerun_did_not_establish_cause")
+        self.assertEqual(result["experiments"], 1)
+        self.assertEqual(result["usage"]["prompt_tokens"], 50)

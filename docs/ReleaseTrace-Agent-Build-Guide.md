@@ -13,7 +13,7 @@ ReleaseTrace is the platform. **Investigator** is the feature reviewers use to e
 
 Complete a synthetic release run, sign in to the dashboard with the project maintainer token, and open the failed account-closure case. Select **Investigate**. The worker restores the stable retrieval setting for that case while preserving the candidate prompt. The saved report compares the stable response, candidate response, and rerun. A viewer can open the report after it has been requested. The release gate retains its original verdict.
 
-LangGraph runs the local investigation with a scripted planner and a budget of one experiment. The allowlist covers retrieval, prompt, and recorded tool response. The planner abstains when several settings differ. Hosted model selection, staging experiments, and the held-out benchmark are planned work.
+LangGraph runs the local investigation with a scripted planner and a budget of one experiment. The allowlist covers retrieval, prompt, and recorded tool response. The planner abstains when several settings differ. The held-out benchmark can also run with a hosted model. Staging experiments remain planned.
 
 ### Planned connected workflow
 
@@ -82,7 +82,7 @@ When candidate behavior is stochastic, record repeats for both candidate and int
 
 ## 5. Benchmark the contribution
 
-The first offline benchmark is in [`demo/investigation_holdout.json`](../demo/investigation_holdout.json). Run `python -m service.investigation_benchmark` to compare the scripted Investigator with its decision rule alone. Expected labels stay in the benchmark harness. These six synthetic cases measure citation diagnosis under the fixture scorer. Hosted one-shot and tool-using models remain to be measured.
+The first offline benchmark is in [`demo/investigation_holdout.json`](../demo/investigation_holdout.json). Run `python -m service.investigation_benchmark` to compare the scripted Investigator with its decision rule alone. Expected labels stay in the benchmark harness. These six synthetic cases measure citation diagnosis under the fixture scorer. The optional `--model` comparison uses the same model and starting evidence for a one-shot diagnosis and an experiment selection. LangGraph verifies the experiment selection with the fixture scorer.
 
 On `synthetic-holdout-v1`, both methods correctly diagnosed three of four diagnosable cases. The rule made one wrong diagnosis in the tax form case, where the expected policy was absent. The Investigator used four experiments and correctly abstained on that case. Both methods abstained on the diagnosable membership case when the prompt and retrieval settings changed together.
 

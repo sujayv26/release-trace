@@ -12,6 +12,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true", help="Run one pass through the queues")
     parser.add_argument("--publish-checks", action="store_true", help="Publish completed build checks to GitHub")
+    parser.add_argument("--auxiliary-only", action="store_true", help="Leave evaluations to the Temporal worker")
     args = parser.parse_args()
     engine = database()
     with ExitStack() as stack:
@@ -26,7 +27,7 @@ def main():
                 parser.error("Could not load the GitHub App IDs, repository, or RSA key file")
             client = stack.enter_context(github_client())
         while True:
-            processed = process_one(engine)
+            processed = None if args.auxiliary_only else process_one(engine)
             investigated = process_investigation(engine)
             published = app is not None and publish_one(engine, app, client)
             if args.once:

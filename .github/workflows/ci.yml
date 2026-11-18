@@ -52,6 +52,17 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r service/requirements.txt
       - run: python -m unittest service.test_pipeline service.test_check_queue -v
+  temporal:
+    name: Temporal recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r service/requirements.temporal.txt
+      - run: python -m unittest service.test_temporal_worker -v
   dashboard:
     name: Dashboard build
     runs-on: ubuntu-latest

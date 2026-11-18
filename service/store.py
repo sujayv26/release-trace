@@ -38,6 +38,15 @@ investigations = Table(
     Column("state", String(16), nullable=False, index=True),
     Column("report", JSON),
 )
+approvals = Table(
+    "approvals",
+    metadata,
+    Column("run_id", ForeignKey("webhook_deliveries.id"), primary_key=True),
+    Column("image_digest", String(71), nullable=False),
+    Column("decision", String(8), nullable=False),
+    Column("actor", String(128), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
 
 
 def database():
@@ -65,13 +74,16 @@ def enqueue(engine, delivery_id, repository, installation, sha, inputs):
     return "queued"
 
 
-def process_one(engine):
+def process_one(engine, delivery_id=None):
     # Keep the claim and result in one transaction. A worker crash rolls
     # back the claim, so the next worker can process the same delivery.
     with engine.begin() as connection:
-        job = connection.execute(select(deliveries).where(
-            deliveries.c.state == "queued",
-        ).order_by(deliveries.c.id).limit(1).with_for_update(skip_locked=True)).one_or_none()
+        query = select(deliveries).where(deliveries.c.state == "queued")
+        if delivery_id is not None:
+            query = query.where(deliveries.c.id == delivery_id)
+        job = connection.execute(
+            query.order_by(deliveries.c.id).limit(1).with_for_update(skip_locked=delivery_id is None)
+        ).one_or_none()
         if job is None:
             return None
         claimed = connection.execute(update(deliveries).where(

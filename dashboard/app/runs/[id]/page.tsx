@@ -1,15 +1,15 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { startInvestigation } from '../../actions';
+import { recordDecision, startInvestigation } from '../../actions';
 import { Evidence, RunTime, Status } from '../../components';
 import { type Case, type Page, readApi, ReleaseApiError, type RunDetail, viewerToken } from '../../../lib/releases';
 
 export default async function RunPage({ params, searchParams }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ outcome?: string; after?: string; investigation?: string }>;
+  searchParams: Promise<{ outcome?: string; after?: string; investigation?: string; decision?: string }>;
 }) {
   const { id } = await params;
-  const { outcome, after, investigation } = await searchParams;
+  const { outcome, after, investigation, decision } = await searchParams;
   if (!/^[A-Za-z0-9-]{1,128}$/.test(id)) notFound();
   const token = await viewerToken();
   if (!token) redirect('/');
@@ -41,12 +41,22 @@ export default async function RunPage({ params, searchParams }: {
       <h1>Release evaluation</h1>
       {investigation === 'access' && <p role="alert">A maintainer token is required to start an investigation.</p>}
       {investigation === 'unavailable' && <p role="alert">The investigation could not be started. Try again shortly.</p>}
+      {decision === 'unavailable' && <p role="alert">The release decision could not be recorded. Review the current run and your access.</p>}
       <p className="commit"><code>{run.commit_sha}</code> <Status value={report ? run.state : 'pending'} /></p>
       <p>Queued <RunTime value={run.created_at} />{report && <> · Completed <RunTime value={run.completed_at} /></>}</p>
       <p className="intro">{run.evaluation_mode === 'build_endpoints' ? 'Build endpoint evaluation' : 'Synthetic evaluation'}</p>
       {report ? (
         <>
           <p>Release gate <Status value={report.verdict ?? report.candidate.verdict} /></p>
+          {run.approval && <p>
+            {run.approval.decision === 'approve' ? 'Approved' : 'Rejected'} by {run.approval.actor} at <RunTime value={run.approval.created_at} />
+          </p>}
+          {run.can_record_decision && report.builds && (
+            <form action={recordDecision.bind(null, id, report.builds.candidate.image_digest)}>
+              {report.verdict === 'pass' && <button className="primary" name="decision" value="approve">Approve candidate</button>}
+              {' '}<button name="decision" value="reject">Reject candidate</button>
+            </form>
+          )}
           {report.reason === 'baseline_not_verified' && <p>The stable build did not clear the release gate.</p>}
           {run.github_check_id && <p>Published GitHub Check <code>{run.github_check_id}</code></p>}
           {run.github_check_retry_at && <p>GitHub Check publication will retry after <RunTime value={run.github_check_retry_at} />.</p>}

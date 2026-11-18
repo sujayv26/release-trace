@@ -48,6 +48,8 @@ export type RunDetail = {
   github_check_retry_at: string | null;
   evaluation_mode: EvaluationMode;
   can_investigate: boolean;
+  can_record_decision: boolean;
+  approval: { decision: 'approve' | 'reject'; image_digest: string; actor: string; created_at: string } | null;
   report: Report | null;
 };
 

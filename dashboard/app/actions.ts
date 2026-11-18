@@ -28,6 +28,22 @@ export async function signOut() {
   redirect('/');
 }
 
+export async function recordDecision(id: string, imageDigest: string, form: FormData) {
+  if (!/^[A-Za-z0-9-]{1,128}$/.test(id)) redirect('/');
+  const token = await viewerToken();
+  if (!token) redirect('/');
+  const path = `/runs/${id}`;
+  const decision = form.get('decision');
+  if (decision !== 'approve' && decision !== 'reject') redirect(path);
+  try {
+    await readApi(`/v1${path}/approval`, token, { decision, image_digest: imageDigest });
+  } catch (error) {
+    if (error instanceof ReleaseApiError && error.status === 401) redirect('/');
+    redirect(`${path}?decision=unavailable`);
+  }
+  redirect(path);
+}
+
 export async function startInvestigation(id: string, caseId: string) {
   if (!/^[A-Za-z0-9-]{1,128}$/.test(id)) redirect('/');
   const token = await viewerToken();

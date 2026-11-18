@@ -33,18 +33,20 @@ class PipelineTest(unittest.TestCase):
                 "RELEASETRACE_REPOSITORY_ID": "41",
                 "RELEASETRACE_INSTALLATION_ID": "42",
                 "RELEASETRACE_BUILD_TARGETS_FILE": str(path),
+                "RELEASETRACE_APPROVER_TOKEN": "test-approver",
+                "RELEASETRACE_APPROVER_ACTOR": "release-reviewer",
             }):
                 engine = database()
                 cleanup.callback(engine.dispose)
                 upgrade_database(engine)
                 with TestClient(create_app()) as client:
-                    def push(commit):
+                    def push(commit, delivery_id="build-1"):
                         body = json.dumps({
                             "after": commit, "ref": "refs/heads/main", "deleted": False,
                             "repository": {"id": 41}, "installation": {"id": 42},
                         }).encode()
                         response = client.post("/webhooks/github", content=body, headers={
-                            "X-GitHub-Event": "push", "X-GitHub-Delivery": "build-1",
+                            "X-GitHub-Event": "push", "X-GitHub-Delivery": delivery_id,
                             "X-Hub-Signature-256": "sha256=" + hmac.digest(b"test-secret", body, "sha256").hex(),
                         })
                         self.assertEqual(response.status_code, 202)
@@ -58,7 +60,7 @@ class PipelineTest(unittest.TestCase):
                     detail = "/v1/runs/build-1"
                     self.assertEqual(client.get(detail, headers=auth).json()["evaluation_mode"], "build_endpoints")
 
-                    def run_pinned(targets, fixture, suite):
+                    def run_pinned(targets, fixture, suite, *, fail_candidate=True):
                         self.assertEqual(targets, pinned)
                         cases = {case["case_id"]: case for case in [fixture, *suite["cases"]]}
 
@@ -66,7 +68,9 @@ class PipelineTest(unittest.TestCase):
                             case = cases[json.loads(request.content)["case_id"]]
                             is_candidate = request.url.port == 8102
                             target = targets.candidate if is_candidate else targets.baseline
-                            citation = "account-closure-v1" if is_candidate and case["critical"] else case["required_citation"]
+                            citation = case["required_citation"]
+                            if fail_candidate and is_candidate and case["critical"]:
+                                citation = "account-closure-v1"
                             return httpx.Response(200, json={"build": target.build.model_dump(), "citation": citation})
 
                         with httpx.Client(transport=httpx.MockTransport(respond)) as evaluator:
@@ -84,6 +88,45 @@ class PipelineTest(unittest.TestCase):
                     self.assertEqual(failing[0]["candidate"]["citation"], "account-closure-v1")
                     check = check_payload(completed_run(engine, "build-1", 41, 42))
                     self.assertEqual((check["name"], check["head_sha"], check["conclusion"]), (BUILD_CHECK_NAME, sha, "failure"))
+
+                    approver = {"Authorization": "Bearer test-approver"}
+                    approval = {"decision": "approve", "image_digest": pinned.candidate.build.image_digest}
+                    endpoint = f"{detail}/approval"
+                    self.assertEqual(client.post(endpoint, json=approval).status_code, 401)
+                    self.assertEqual(client.post(endpoint, headers=auth, json=approval).status_code, 403)
+                    blocked = client.post(endpoint, headers=approver, json=approval)
+                    self.assertEqual((blocked.status_code, blocked.json()["code"]), (409, "gate_not_passed"))
+                    rejected = client.post(endpoint, headers=approver, json={**approval, "decision": "reject"})
+                    self.assertEqual(rejected.status_code, 200)
+                    self.assertEqual(rejected.json()["decision"], "reject")
+
+                    self.assertEqual(push(sha, "build-passing"), "queued")
+                    endpoint = "/v1/runs/build-passing/approval"
+                    self.assertEqual(client.post(endpoint, headers=approver, json=approval).status_code, 409)
+                    with patch("service.store.evaluate_configured_builds",
+                               side_effect=lambda *args: run_pinned(*args, fail_candidate=False)):
+                        self.assertEqual(process_one(engine), "build-passing")
+                    passing_run = "/v1/runs/build-passing"
+                    self.assertTrue(client.get(passing_run, headers=approver).json()["can_record_decision"])
+                    self.assertFalse(client.get(passing_run, headers=auth).json()["can_record_decision"])
+                    saved = client.post(endpoint, headers=approver, json=approval)
+                    self.assertEqual(saved.status_code, 200)
+                    self.assertEqual(saved.json()["actor"], "release-reviewer")
+                    reviewed = client.get(passing_run, headers=auth).json()
+                    self.assertEqual(reviewed["approval"], saved.json())
+                    self.assertFalse(reviewed["can_record_decision"])
+                    self.assertEqual(client.post(endpoint, headers=approver, json=approval).json(), saved.json())
+                    conflict = client.post(endpoint, headers=approver, json={**approval, "decision": "reject"})
+                    self.assertEqual((conflict.status_code, conflict.json()["code"]), (409, "decision_exists"))
+
+                    updated = pinned.model_dump(mode="json")
+                    updated["candidate"]["build"]["image_digest"] = "sha256:" + "e" * 64
+                    new_targets = Path(directory, "superseding-targets.json")
+                    new_targets.write_text(json.dumps(updated), encoding="utf-8")
+                    with patch.dict(os.environ, {"RELEASETRACE_BUILD_TARGETS_FILE": str(new_targets)}):
+                        with TestClient(create_app()) as restarted:
+                            stale = restarted.post(endpoint, headers=approver, json=approval)
+                            self.assertEqual((stale.status_code, stale.json()["code"]), (409, "stale_candidate"))
 
     def test_signed_delivery_produces_one_scoped_report(self):
         with tempfile.TemporaryDirectory() as directory, ExitStack() as cleanup:

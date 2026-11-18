@@ -16,12 +16,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictInt, ValidationError
 from sqlalchemy import func, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
-from .evaluate_builds import BuildTargets
+from .evaluate_builds import BuildTargets, ImageDigest
 from .investigator import enqueue_investigation, investigation_key
-from .store import database, deliveries, enqueue, investigations
+from .store import approvals, database, deliveries, enqueue, investigations
 
 MAX_BODY = 1024 * 1024
 DELIVERY_ID = re.compile(r"[A-Za-z0-9-]{1,128}")
@@ -104,6 +104,17 @@ class InvestigationRequest(BaseModel):
     case_id: Annotated[str, Field(min_length=1, max_length=128)]
 
 
+class ApprovalRequest(BaseModel):
+    image_digest: ImageDigest
+    decision: Literal["approve", "reject"]
+
+
+class ApprovalDetail(ApprovalRequest):
+    run_id: str
+    actor: str
+    created_at: datetime
+
+
 class QueuedInvestigation(BaseModel):
     investigation_id: str
 
@@ -157,12 +168,19 @@ def create_app():
     secret = os.environ["RELEASETRACE_WEBHOOK_SECRET"].encode()
     token = os.environ["RELEASETRACE_READ_TOKEN"].encode()
     maintainer_token = os.getenv("RELEASETRACE_MAINTAINER_TOKEN", "").encode()
+    approver_token = os.getenv("RELEASETRACE_APPROVER_TOKEN", "").encode()
+    approver_actor = os.getenv("RELEASETRACE_APPROVER_ACTOR", "").strip()
     repository = int(os.environ["RELEASETRACE_REPOSITORY_ID"])
     installation = int(os.environ["RELEASETRACE_INSTALLATION_ID"])
     if not secret or not token or repository <= 0 or installation <= 0:
         raise ValueError("Webhook secret, read token and positive GitHub IDs are required")
     if maintainer_token and hmac.compare_digest(token, maintainer_token):
         raise ValueError("Use distinct viewer and maintainer tokens")
+    if approver_token and (
+        not 1 <= len(approver_actor) <= 128 or
+        any(hmac.compare_digest(approver_token, role_token) for role_token in (token, maintainer_token))
+    ):
+        raise ValueError("An approver requires an actor name and a distinct token")
     engine = database()
     demo = Path(__file__).resolve().parents[1] / "demo"
     inputs = {
@@ -202,7 +220,7 @@ def create_app():
         return hmac.compare_digest(provided, b"Bearer " + maintainer_token)
 
     def require_read(request: Request):
-        if is_maintainer(request):
+        if is_maintainer(request) or is_approver(request):
             return
         provided = request.headers.get("authorization", "").encode()
         if not hmac.compare_digest(provided, b"Bearer " + token):
@@ -212,6 +230,22 @@ def create_app():
         require_read(request)
         if not is_maintainer(request):
             raise ReadError(403, "maintainer_required", "A project maintainer token is required")
+
+    def is_approver(request: Request):
+        provided = request.headers.get("authorization", "").encode()
+        return bool(approver_token) and hmac.compare_digest(provided, b"Bearer " + approver_token)
+
+    def require_approver(request: Request):
+        require_read(request)
+        if not is_approver(request):
+            raise ReadError(403, "approver_required", "A project approver token is required")
+
+    def is_current_candidate(run):
+        report = run["report"] or {}
+        return targets is not None and (
+            run["commit_sha"] == targets.candidate.build.commit_sha
+            and report.get("builds", {}).get("candidate") == targets.candidate.build.model_dump()
+        )
 
     def load_run(delivery_id, *columns):
         with engine.connect() as connection:
@@ -245,6 +279,7 @@ def create_app():
         with engine.connect() as connection:
             connection.execute(select(deliveries.c.created_at, deliveries.c.github_check_id).limit(1))
             connection.execute(select(investigations.c.id).limit(1))
+            connection.execute(select(approvals.c.run_id).limit(1))
         return {"status": "ready"}
 
     @app.post("/webhooks/github", response_model=Accepted, status_code=202)
@@ -310,6 +345,12 @@ def create_app():
             deliveries.c.created_at, deliveries.c.completed_at, deliveries.c.github_check_id,
             deliveries.c.github_check_retry_at, mode,
         )
+        approval = None
+        if result["evaluation_mode"] == "build_endpoints":
+            with engine.connect() as connection:
+                approval = connection.execute(select(approvals).where(
+                    approvals.c.run_id == delivery_id,
+                )).mappings().one_or_none()
         return {
             **result,
             "created_at": as_utc(result["created_at"]),
@@ -317,6 +358,10 @@ def create_app():
             "github_check_retry_at": as_utc(result["github_check_retry_at"]),
             "can_investigate": is_maintainer(request) and result["evaluation_mode"] == "synthetic_fixture"
             and result["state"] == "completed",
+            "approval": ApprovalDetail(**{**approval, "created_at": as_utc(approval["created_at"])}) if approval else None,
+            "can_record_decision": is_approver(request) and approval is None
+            and result["evaluation_mode"] == "build_endpoints" and result["state"] == "completed"
+            and is_current_candidate(result),
         }
 
     @app.get("/v1/runs/{delivery_id}/cases", dependencies=[Depends(require_read)])
@@ -356,6 +401,35 @@ def create_app():
                 for investigation_id in saved:
                     ids[investigation_id].investigation_id = investigation_id
         return CasePage(state=run["state"], items=items, next_cursor=next_cursor)
+
+    @app.post("/v1/runs/{delivery_id}/approval", dependencies=[Depends(require_approver)])
+    def record_approval(delivery_id: str, body: ApprovalRequest) -> ApprovalDetail:
+        run = load_run(delivery_id, deliveries.c.state, deliveries.c.commit_sha, deliveries.c.report, mode)
+        report = run["report"] or {}
+        if run["evaluation_mode"] != "build_endpoints" or run["state"] != "completed":
+            raise ReadError(409, "run_not_eligible", "A completed build evaluation is required")
+        if not is_current_candidate(run) or body.image_digest != targets.candidate.build.image_digest:
+            raise ReadError(409, "stale_candidate", "The run and requested digest must match the configured candidate")
+        if body.decision == "approve" and report.get("verdict") != "pass":
+            raise ReadError(409, "gate_not_passed", "The release gate must pass before approval")
+
+        record = ApprovalDetail(
+            **body.model_dump(), run_id=delivery_id, actor=approver_actor, created_at=datetime.now(timezone.utc),
+        )
+        try:
+            with engine.begin() as connection:
+                connection.execute(approvals.insert().values(**record.model_dump()))
+        except IntegrityError:
+            with engine.connect() as connection:
+                existing = connection.execute(select(approvals).where(
+                    approvals.c.run_id == delivery_id,
+                )).mappings().one_or_none()
+            if existing is None:
+                raise
+            if any(existing[key] != getattr(record, key) for key in ("image_digest", "decision", "actor")):
+                raise ReadError(409, "decision_exists", "A different decision already exists for this run")
+            return ApprovalDetail(**{**existing, "created_at": as_utc(existing["created_at"])})
+        return record
 
     @app.post("/v1/runs/{delivery_id}/investigations", status_code=202, dependencies=[Depends(require_maintainer)])
     def start_investigation(delivery_id: str, body: InvestigationRequest) -> QueuedInvestigation:

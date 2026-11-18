@@ -10,7 +10,7 @@ Use JSON and typed request/response schemas. Return a stable error code, safe me
 | GET /v1/runs/{id}/cases | Page through case results, optionally filter for failures |
 | POST /v1/runs/{id}/investigations | Accept a failed case ID, return 202 with an investigation ID; deduplicate retries |
 | GET /v1/runs/{id}/investigations/{investigation_id} | Read the report and scoped evidence references |
-| POST /v1/runs/{id}/approval | Record a decision for the evaluated digest; return 409 for stale candidates |
+| POST /v1/runs/{id}/approval | Approver submits `decision` (approve/reject) and `image_digest`; returns the saved decision, or 409 for a stale candidate, ineligible run, or conflicting decision |
 | GET /healthz and /readyz | Indicate liveness and whether dependencies are ready |
 
 Keep GitHub App credentials, database configuration and model keys server-side. Apply request bounds and timeouts. Missing required evidence yields an inconclusive gate that blocks promotion.

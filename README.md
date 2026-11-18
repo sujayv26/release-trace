@@ -223,6 +223,52 @@ IDs and credentials. [GitHub push event permissions](https://docs.github.com/en/
    there is exactly one from the App with that name and delivery GUID.
    [GitHub App redelivery](https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/redelivering-webhooks#redelivering-github-app-webhooks) · [Check Runs API](https://docs.github.com/en/rest/checks/runs#list-check-runs-for-a-git-reference)
 
+## Run evaluations with Temporal
+
+Install the optional dependencies with
+`python -m pip install -r service/requirements.temporal.txt`. Apply migrations
+with `python -m service.store` and start the API with the same database URL.
+For local development, start a Temporal CLI server with `temporal server start-dev`
+in another terminal, then run `python -m service.temporal_worker`. Run
+`python -m service.worker --auxiliary-only` for investigations and add
+`--publish-checks` there if you have configured GitHub Check publishing.
+
+The signed webhook commits the queued delivery before the Temporal worker
+dispatches it. Temporal uses the delivery ID to deduplicate workflow starts.
+If a worker exits before an evaluation commits, the next attempt can retry
+it. If the result was committed before the interruption, the retry returns
+without rewriting it. A remote or timed-out evaluation request may be repeated.
+Use a dedicated Temporal namespace or task queue for each shared database.
+The local defaults are `127.0.0.1:7233`, namespace `default`, and queue
+`releasetrace-evaluations`. Set `RELEASETRACE_TEMPORAL_ADDRESS`,
+`RELEASETRACE_TEMPORAL_NAMESPACE`, or `RELEASETRACE_TEMPORAL_TASK_QUEUE`
+to override them.
+
+Run `python -m unittest service.test_temporal_worker -v` for the key-free
+recovery drill. The SDK downloads and starts a temporary test server. The
+test replaces the evaluation worker after an injected acknowledgement
+failure and checks that the saved report and timestamp are preserved.
+
+## Record a protected release decision
+
+Apply migrations with `python -m service.store`. Set
+`RELEASETRACE_APPROVER_TOKEN` to a separate approver credential and
+`RELEASETRACE_APPROVER_ACTOR` to the reviewer's audit name on the API.
+Sign in to the dashboard with the approver token and open the build run.
+The run page shows the available decisions and the saved decision. To use
+the API, send `POST /v1/runs/{delivery_id}/approval` with that bearer token and
+`{"decision":"approve","image_digest":"sha256:<64 lowercase hex digits>"}`.
+Use the candidate digest from the saved build report. Approval requires a
+completed, passing build evaluation for the configured candidate. An
+approver can also record `reject` for a completed build evaluation.
+Repeating the same decision returns the original record and timestamp.
+
+The running API's target configuration defines the current candidate.
+Restart the API when the target file changes, and switch all serving instances
+to the same configuration before accepting approvals for a new candidate.
+Requests for a superseded candidate return HTTP 409. The endpoint records a
+decision in the database.
+
 ## Investigate a failed synthetic case
 
 Apply migrations with `python -m service.store` and configure a separate
@@ -259,3 +305,13 @@ The frozen suite covers six cases across different support topics than the
 development fixtures. Four have a known single-setting fix. A `null` label
 means abstention is expected. The report includes the dataset fingerprint,
 per-case findings, diagnosis and abstention counts, and experiments executed.
+
+For the hosted comparison, set `OPENAI_API_KEY` in your environment and run
+`python -m service.investigation_benchmark --model YOUR_MODEL_ID` with an
+OpenAI Chat Completions model that supports JSON mode. The command sends the
+same synthetic starting evidence to both model methods. Each method makes one
+request per case, for twelve requests across the holdout. The experiment
+method records a diagnosis only when the controlled rerun establishes it.
+The JSON report includes the returned model ID, token counts, elapsed time
+and per-case reasons. A failed provider request exits with an error so it
+doesn't count as an abstention.
