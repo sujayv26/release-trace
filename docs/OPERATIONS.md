@@ -7,7 +7,7 @@ Start with the [Compose walkthrough](../README.md#run-the-local-demo). This guid
 ```bash
 python -m pip install -r service/requirements.txt
 python -m unittest discover -s demo -v
-python -m unittest service.test_schema service.test_pipeline service.test_github_check service.test_evaluate_builds service.test_check_queue service.test_investigator -v
+python -m unittest service.test_schema service.test_pipeline service.test_github_check service.test_evaluate_builds service.test_check_queue service.test_investigator service.test_project_evaluation -v
 python -m service.investigation_benchmark
 ```
 
@@ -59,7 +59,8 @@ project file unless it is absolute.
       "installation_id": 67890,
       "organization": "support-team",
       "name": "Support application",
-      "build_targets_file": "support-builds.json"
+      "build_targets_file": "support-builds.json",
+      "evaluation_file": "support-evaluation.json"
     }
   ]
 }
@@ -96,8 +97,55 @@ Serve the hosted dashboard and webhook over HTTPS. Managed mode accepts only
 individual account keys. The database pins each managed repository to its
 organization at startup, and the API rejects a configuration that moves a
 repository to another organization or switches it back to shared tokens.
-Restart API instances together when the project directory or build targets
-change. After an installation change, grant access under the new installation.
+Restart API instances together when the project directory, build targets, or
+evaluation files change. After an installation change, grant access under the
+new installation.
+
+### Define a project's evaluation
+
+Set `evaluation_file` alongside `build_targets_file`. Both paths are resolved
+relative to the project directory file unless absolute. Put the suite and
+gate in the same file, as in this `support-evaluation.json` example:
+
+```json
+{
+  "suite": {
+    "revision": "support-v1",
+    "cases": [
+      {
+        "case_id": "refund-window",
+        "question": "How long do I have to request a refund?",
+        "required_citation": "refunds-v2",
+        "policies": [
+          {"id": "refunds-v1", "revision": 1, "text": "Refunds are available for 14 days."},
+          {"id": "refunds-v2", "revision": 2, "text": "Refunds are available for 30 days."}
+        ]
+      }
+    ]
+  },
+  "policy": {
+    "revision": "support-gate-v1",
+    "minimum_score": 1.0,
+    "critical_cases": ["refund-window"]
+  }
+}
+```
+
+Use unique case IDs and include the expected citation in each case's policy
+catalog. Every case requires evidence. A verified wrong citation fails the
+case. A failed critical case blocks the release even if the candidate meets
+the score threshold. An unavailable or unrecognized citation is missing
+evidence and prevents a passing gate. Both the baseline and candidate must
+pass before an approver can approve the release.
+
+The API validates up to 25 cases per suite and 512 KiB per evaluation file.
+Bump the suite or policy revision when changing its content. The API records
+the validated suite, policy, revisions, and SHA-256 fingerprints when it queues
+a delivery. Fingerprints cover the normalized JSON of each section, including
+its revision. The dashboard shows them under **Evaluation provenance**. After
+an API restart, new deliveries use the updated files. Pending runs and
+redeliveries of already queued IDs keep their original inputs. Projects without
+an evaluation file use the checked-in demo cases.
 
 In the second terminal, run `python -m service.worker`. A signed GitHub App
 branch push to `/webhooks/github` queues one job per delivery ID. Read its state
@@ -181,21 +229,45 @@ The candidate still passes 80% of the cases. Its wrong account-closure citation
 blocks the release. Exit codes are `0` for pass, `1` for block, and `2` for an
 inconclusive run or invalid command configuration.
 
-For your own builds, use the same [target file shape](../demo/build_targets.json)
-and point to each build's evaluation endpoint. Each endpoint accepts a JSON
-`POST` body with `case_id` and `question` and returns
-`{"build":{"commit_sha":"…","image_digest":"sha256:…"},"citation":"…"}`.
-Return `null` when there is no citation. Populate build identity from trusted
-deployment metadata. ReleaseTrace compares the endpoint's reported identity
-with the configured values. Remote endpoints use HTTPS, and optional bearer
-tokens come from `RELEASETRACE_BASELINE_EVALUATION_TOKEN` and
-`RELEASETRACE_CANDIDATE_EVALUATION_TOKEN`. This path runs from the CLI and writes
-the report to standard output.
+### Application evaluation HTTP contract
+
+Use the [build target file shape](../demo/build_targets.json) to configure a
+baseline and candidate URL. Serve each endpoint over HTTPS outside loopback.
+The worker sends one JSON `POST` per case to each build. For example:
+
+```json
+{"case_id":"refund-window","question":"How long do I have to request a refund?"}
+```
+
+Return HTTP 200 and JSON with the actual build's identity and the citation
+produced by the application:
+
+```json
+{
+  "build": {
+    "commit_sha": "2222222222222222222222222222222222222222",
+    "image_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "citation": "refunds-v2"
+}
+```
+
+Use a full lowercase 40-character commit SHA and a SHA-256 OCI digest from
+trusted deployment metadata. These must match the configured target. Return
+`null` when the application cannot cite a source. ReleaseTrace compares the
+citation to the saved case's expected citation. Endpoint errors, unrecognized
+citations, identity mismatches, redirects, and invalid responses yield missing
+evidence. Send an uncompressed response of at most 16 KiB and respond within
+the worker's five-second timeout. If the app requires authentication, configure
+the [project-scoped bearer tokens](#configure-managed-projects-and-reviewer-accounts)
+on the worker. The stand-alone demo and legacy workers use the same token names
+without the repository suffix.
 
 ### Run build evaluations from GitHub pushes
 
-Set `RELEASETRACE_BUILD_TARGETS_FILE` on the API to the target file and restart
-the API when the build pair changes. The candidate must be deployed and its
+Managed projects configure `build_targets_file` in the project directory.
+For the single-project demo, set `RELEASETRACE_BUILD_TARGETS_FILE` on the API.
+Restart the API when the build pair changes. The candidate must be deployed and its
 commit SHA must match the signed push. The API snapshots the build pair with
 the job. In this mode, pushes for other commits are ignored. Optional tokens
 belong in the worker's environment. Scope them to their respective endpoints.

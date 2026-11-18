@@ -24,7 +24,7 @@ jobs:
       - run: python demo/release_trace_demo.py
       - run: python demo/release_gate.py
       - run: python -m pip install -r service/requirements.txt
-      - run: python -m unittest service.test_schema service.test_pipeline service.test_github_check service.test_evaluate_builds service.test_check_queue service.test_investigator -v
+      - run: python -m unittest service.test_schema service.test_pipeline service.test_github_check service.test_evaluate_builds service.test_check_queue service.test_investigator service.test_project_evaluation -v
   postgres:
     name: PostgreSQL integration
     runs-on: ubuntu-latest
@@ -51,7 +51,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r service/requirements.txt
-      - run: python -m unittest service.test_pipeline service.test_check_queue -v
+      - run: python -m unittest service.test_pipeline service.test_check_queue service.test_project_evaluation -v
   temporal:
     name: Temporal recovery
     runs-on: ubuntu-latest

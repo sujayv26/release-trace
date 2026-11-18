@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from demo.release_gate import run_suite
 
 from .evaluate_builds import BuildTargets, evaluate_configured_builds
+from .evaluation_config import EvaluationSnapshot
 
 metadata = MetaData()
 deliveries = Table(
@@ -126,15 +127,15 @@ def process_one(engine, delivery_id=None):
         ).values(state="running"))
         if claimed.rowcount != 1:
             return None
-        fixture, suite = job.inputs["fixture"], job.inputs["suite"]
-        if job.inputs.get("evaluation_mode") == "build_endpoints":
-            targets = BuildTargets.model_validate(job.inputs["build_targets"])
-            if job.inputs.get("project_scoped_tokens"):
-                report = evaluate_configured_builds(targets, fixture, suite, repository_id=job.repository_id)
-            else:
-                report = evaluate_configured_builds(targets, fixture, suite)
+        inputs = job.inputs
+        if inputs.get("evaluation_mode") == "build_endpoints":
+            targets = BuildTargets.model_validate(inputs["build_targets"])
+            options = {"repository_id": job.repository_id} if inputs.get("project_scoped_tokens") else {}
+            if "project_evaluation" in inputs:
+                options["project_evaluation"] = EvaluationSnapshot.model_validate(inputs["project_evaluation"])
+            report = evaluate_configured_builds(targets, inputs.get("fixture"), inputs.get("suite"), **options)
         else:
-            report = run_suite(fixture, suite)
+            report = run_suite(inputs["fixture"], inputs["suite"])
         connection.execute(update(deliveries).where(deliveries.c.id == job.id).values(
             state="completed", report=report, completed_at=datetime.now(timezone.utc),
         ))

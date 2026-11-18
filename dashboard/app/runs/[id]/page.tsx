@@ -73,6 +73,8 @@ export default async function RunPage({ params, searchParams }: {
           <details className="panel provenance">
             <summary>Evaluation provenance</summary>
             <dl>
+              {report.suite_revision && <><dt>Suite revision</dt><dd><code>{report.suite_revision}</code></dd></>}
+              {report.policy_revision && <><dt>Policy revision</dt><dd><code>{report.policy_revision}</code></dd></>}
               <dt>Dataset digest</dt><dd><code>{report.dataset_digest}</code></dd>
               <dt>Policy digest</dt><dd><code>{report.policy_digest}</code></dd>
               {report.builds && <>

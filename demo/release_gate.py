@@ -40,24 +40,24 @@ def apply_gate(requirements, results, minimum_score):
     }
 
 
-def evaluate_suite(fixture, suite, evaluate_variant):
-    requirements = {
-        item["case_id"]: item["critical"]
-        for item in [fixture, *suite["cases"]]
-    }
-    cases = [fixture, *suite["cases"]]
+def evaluate_cases(cases, minimum_score, evaluate_variant):
+    requirements = {item["case_id"]: item["critical"] for item in cases}
     if len(requirements) != len(cases):
         raise ValueError("Case IDs must be unique")
     report = {"dataset_digest": digest(cases), "policy_digest": digest({
-        "requirements": requirements, "minimum_score": suite["minimum_score"],
+        "requirements": requirements, "minimum_score": minimum_score,
     })}
     for variant in ("baseline", "candidate"):
         results = {case["case_id"]: evaluate_variant(variant, case) for case in cases}
         report[variant] = {
             "results": results,
-            **apply_gate(requirements, results, suite["minimum_score"]),
+            **apply_gate(requirements, results, minimum_score),
         }
     return report
+
+
+def evaluate_suite(fixture, suite, evaluate_variant):
+    return evaluate_cases([fixture, *suite["cases"]], suite["minimum_score"], evaluate_variant)
 
 
 def case_config(fixture, case, variant):

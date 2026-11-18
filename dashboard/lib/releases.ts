@@ -43,6 +43,8 @@ type Report = {
   candidate: Gate;
   dataset_digest: string;
   policy_digest: string;
+  suite_revision?: string;
+  policy_revision?: string;
   verdict?: string;
   reason?: string | null;
   builds?: Record<'baseline' | 'candidate', Build>;

@@ -10,7 +10,7 @@ from typing import Annotated
 import httpx
 from pydantic import BaseModel, HttpUrl, StringConstraints, ValidationError, field_validator
 
-from demo.release_gate import evaluate_suite
+from demo.release_gate import evaluate_cases, evaluate_suite
 
 FIXTURES = Path(__file__).resolve().parents[1] / "demo"
 MAX_RESPONSE_BYTES = 16_384
@@ -92,12 +92,21 @@ def score_case(client, target, case, token=None):
     }
 
 
-def evaluate_builds(client, targets, fixture, suite, tokens=None):
+def evaluate_builds(client, targets, fixture, suite, tokens=None, *, project_evaluation=None):
     by_variant = {"baseline": targets.baseline, "candidate": targets.candidate}
     tokens = tokens or {}
-    report = evaluate_suite(fixture, suite, lambda variant, case: score_case(
-        client, by_variant[variant], case, tokens.get(variant),
-    ))
+
+    def evaluate_variant(variant, case):
+        return score_case(client, by_variant[variant], case, tokens.get(variant))
+
+    if project_evaluation is None:
+        report = evaluate_suite(fixture, suite, evaluate_variant)
+    else:
+        report = evaluate_cases(project_evaluation.cases(), project_evaluation.policy.minimum_score, evaluate_variant)
+        report.update(
+            suite_revision=project_evaluation.suite.revision, policy_revision=project_evaluation.policy.revision,
+            dataset_digest=project_evaluation.dataset_digest, policy_digest=project_evaluation.policy_digest,
+        )
     ready = report["baseline"]["verdict"] == "pass"
     candidate = report["candidate"]["verdict"]
     return {
@@ -110,12 +119,12 @@ def evaluate_builds(client, targets, fixture, suite, tokens=None):
     }
 
 
-def evaluate_configured_builds(targets, fixture, suite, *, repository_id=None):
+def evaluate_configured_builds(targets, fixture, suite, *, repository_id=None, project_evaluation=None):
     suffix = f"_{repository_id}" if repository_id is not None else ""
     tokens = {variant: os.getenv(f"RELEASETRACE_{variant.upper()}_EVALUATION_TOKEN{suffix}")
               for variant in ("baseline", "candidate")}
     with httpx.Client(timeout=RESPONSE_TIMEOUT, follow_redirects=False, trust_env=False) as client:
-        return evaluate_builds(client, targets, fixture, suite, tokens)
+        return evaluate_builds(client, targets, fixture, suite, tokens, project_evaluation=project_evaluation)
 
 
 def main():

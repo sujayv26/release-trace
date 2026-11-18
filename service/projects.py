@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .evaluate_builds import BuildTargets
+from .evaluation_config import EvaluationSnapshot, read_evaluation
 
 Role = Literal["viewer", "maintainer", "approver"]
 GitHubID = Annotated[int, Field(strict=True, gt=0, le=2**63 - 1)]
@@ -21,6 +22,7 @@ class ProjectConfig(BaseModel):
     organization: Annotated[str, Field(min_length=1, max_length=63, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")]
     name: Annotated[str, Field(min_length=1, max_length=120)]
     build_targets_file: Path | None = None
+    evaluation_file: Path | None = None
 
 
 class ProjectDirectory(BaseModel):
@@ -35,6 +37,7 @@ class Project:
     organization: str
     name: str
     targets: BuildTargets | None
+    evaluation: EvaluationSnapshot | None = None
 
 
 def read_targets(path):
@@ -57,8 +60,11 @@ def managed_projects(path):
         if entry.repository_id in projects:
             raise ValueError("Each repository must appear only once in the managed project file")
         targets = read_targets(path.parent / entry.build_targets_file) if entry.build_targets_file else None
+        if entry.evaluation_file and targets is None:
+            raise ValueError("A project evaluation requires a build targets file")
+        evaluation = read_evaluation(path.parent / entry.evaluation_file) if entry.evaluation_file else None
         projects[entry.repository_id] = Project(
-            entry.repository_id, entry.installation_id, entry.organization, entry.name, targets,
+            entry.repository_id, entry.installation_id, entry.organization, entry.name, targets, evaluation,
         )
     return projects
 

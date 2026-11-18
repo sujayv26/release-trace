@@ -22,6 +22,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .accounts import ACCESS_KEY, bind_project_owners, key_hash
 from .evaluate_builds import BuildIdentity, ImageDigest
+from .evaluation_config import EvaluationSnapshot
 from .investigator import enqueue_investigation, investigation_key
 from .projects import Role, load_projects
 from .store import accounts, approvals, database, deliveries, deployments, enqueue, investigations, project_memberships
@@ -356,10 +357,15 @@ def create_app():
         targets = project.targets
         if targets is not None and push.after != targets.candidate.build.commit_sha:
             return Accepted(status="ignored", delivery_id=delivery_id)
-        inputs = fixture_inputs if targets is None else {
-            **standard_inputs, "evaluation_mode": "build_endpoints", "build_targets": targets.model_dump(mode="json"),
-            **({"project_scoped_tokens": True} if managed else {}),
-        }
+        inputs = fixture_inputs
+        if targets is not None:
+            evaluation_inputs = standard_inputs if project.evaluation is None else {
+                "project_evaluation": project.evaluation.model_dump(mode="json"),
+            }
+            inputs = {
+                **evaluation_inputs, "evaluation_mode": "build_endpoints", "build_targets": targets.model_dump(mode="json"),
+                **({"project_scoped_tokens": True} if managed else {}),
+            }
         status = await run_in_threadpool(
             enqueue, engine, delivery_id, project.repository_id, project.installation_id, push.after, inputs,
         )
@@ -449,7 +455,11 @@ def create_app():
         report = run["report"]
         if report is None:
             return CasePage(state=run["state"], items=[], next_cursor=None)
-        cases = [run["inputs"]["fixture"], *run["inputs"]["suite"]["cases"]]
+        inputs = run["inputs"]
+        if "project_evaluation" in inputs:
+            cases = EvaluationSnapshot.model_validate(inputs["project_evaluation"]).cases()
+        else:
+            cases = [inputs["fixture"], *inputs["suite"]["cases"]]
         baseline = report["baseline"]["results"]
         candidate = report["candidate"]["results"]
         items = []

@@ -14,6 +14,8 @@ ReleaseTrace uses SQLAlchemy and Alembic. PostgreSQL backs Compose and the integ
 
 The worker saves the evaluation claim and report in one transaction. An interruption before commit leaves the delivery queued. A Temporal retry after commit reuses the completed report. Investigation reads and approval writes are scoped through the associated delivery.
 
+Project-specific inputs store the full, normalized suite and gate policy with their revision labels and fingerprints. Both the worker and case evidence API read the saved snapshot. Completed reports include the revisions and fingerprints shown in the dashboard.
+
 Run `python -m service.store` with the configured `RELEASETRACE_DATABASE_URL` before starting an updated API or worker. The migration head is `0007_accounts`. The migration test covers adoption of a legacy schema and preservation of saved reports. Older runs can have missing timestamps.
 
 Project membership changes are operator-managed. A general audit event stream and evidence retention policies are future schema work.
