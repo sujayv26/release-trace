@@ -10,12 +10,14 @@ from urllib.request import Request, urlopen
 from .evaluate_builds import BuildTargets
 
 
-def queue_demo(targets_path=None):
+def queue_demo(targets_path=None, *, extended=False):
     repo = int(os.environ["RELEASETRACE_REPOSITORY_ID"])
     installation = int(os.environ["RELEASETRACE_INSTALLATION_ID"])
     secret = os.environ["RELEASETRACE_WEBHOOK_SECRET"].encode()
     sha = "1" * 40
     delivery_id = f"demo-{repo}-{installation}"
+    if extended:
+        delivery_id += "-extended"
     if targets_path:
         targets = BuildTargets.model_validate_json(targets_path.read_bytes())
         sha = targets.candidate.build.commit_sha
@@ -42,8 +44,9 @@ def queue_demo(targets_path=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--targets", type=Path, help="Use the candidate SHA from the local build target file")
+    parser.add_argument("--extended", action="store_true", help="Use a distinct delivery ID for the extended fixture suite")
     args = parser.parse_args()
-    print(json.dumps(queue_demo(args.targets)))
+    print(json.dumps(queue_demo(args.targets, extended=args.extended)))
 
 
 if __name__ == "__main__":

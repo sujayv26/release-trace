@@ -108,9 +108,9 @@ class QueuedInvestigation(BaseModel):
     investigation_id: str
 
 
-class RetrievalExperiment(CaseVariant):
+class ControlledExperiment(CaseVariant):
     experiment_id: str
-    intervention: Literal["restore_retrieval"]
+    intervention: Literal["restore_retrieval", "restore_prompt", "replay_tool_response"]
 
 
 class InvestigationReport(BaseModel):
@@ -119,7 +119,7 @@ class InvestigationReport(BaseModel):
     required_citation: str
     baseline: CaseVariant
     candidate: CaseVariant
-    experiment: RetrievalExperiment | None
+    experiment: ControlledExperiment | None
     changed_parameter: dict[str, str] | None = None
     dataset_digest: str
     policy_digest: str
@@ -170,6 +170,9 @@ def create_app():
         "suite": json.loads((demo / "gate_suite.json").read_text(encoding="utf-8")),
     }
     targets_path = os.getenv("RELEASETRACE_BUILD_TARGETS_FILE")
+    if not targets_path and os.getenv("RELEASETRACE_EXTENDED_FIXTURES") == "1":
+        extra = json.loads((demo / "investigation_cases.json").read_text(encoding="utf-8"))
+        inputs["suite"]["cases"].extend(extra)
     targets = None
     if targets_path:
         try:

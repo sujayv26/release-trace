@@ -60,9 +60,12 @@ def evaluate_suite(fixture, suite, evaluate_variant):
     return report
 
 
+def case_config(fixture, case, variant):
+    return Config(**{**fixture[variant], **case.get(variant, {})})
+
+
 def run_suite(fixture, suite):
-    configs = {variant: Config(**fixture[variant]) for variant in ("baseline", "candidate")}
-    return evaluate_suite(fixture, suite, lambda variant, case: evaluate(case, configs[variant]))
+    return evaluate_suite(fixture, suite, lambda variant, case: evaluate(case, case_config(fixture, case, variant)))
 
 
 if __name__ == "__main__":

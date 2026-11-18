@@ -3,13 +3,15 @@
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
-from demo.release_trace_demo import Config, digest
+from demo.release_gate import case_config
+from demo.release_trace_demo import digest
 
 from .investigation_graph import MAX_EXPERIMENTS, RESTORE_RETRIEVAL, InvestigationContext, run_graph, scripted_planner
 from .store import deliveries, investigations
 
 
 def investigation_key(run_id, case_id):
+    # Preserve saved IDs from the first retrieval-only implementation.
     return digest([run_id, case_id, RESTORE_RETRIEVAL])
 
 
@@ -33,7 +35,7 @@ def investigate(inputs, report, case_id, *, planner=scripted_planner, experiment
     case = next(item for item in [fixture, *inputs["suite"]["cases"]] if item["case_id"] == case_id)
     baseline = report["baseline"]["results"][case_id]
     candidate = report["candidate"]["results"][case_id]
-    stable_config, candidate_config = (Config(**fixture[name]) for name in ("baseline", "candidate"))
+    stable_config, candidate_config = (case_config(fixture, case, name) for name in ("baseline", "candidate"))
     result = {
         "outcome": "inconclusive", "experiment": None,
         "required_citation": case["required_citation"], "baseline": baseline, "candidate": candidate,

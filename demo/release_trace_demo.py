@@ -10,6 +10,17 @@ from pathlib import Path
 class Config:
     prompt: str
     retrieval: str
+    tool_response: str = ""
+
+    def snapshot(self):
+        return {key: value for key, value in vars(self).items() if key != "tool_response" or value}
+
+
+INTERVENTIONS = {
+    "restore_retrieval": "retrieval",
+    "restore_prompt": "prompt",
+    "replay_tool_response": "tool_response",
+}
 
 
 def digest(value):
@@ -24,13 +35,18 @@ def evaluate(fixture, config):
     ]
     select = {"newest": max, "oldest": min}[config.retrieval]
     chosen = select(relevant, key=lambda policy: policy["revision"], default=None)
+    override = fixture.get("citation_by_setting")
+    if override:
+        expected = override["citations"].get(getattr(config, override["setting"]))
+        chosen = next((policy for policy in fixture["policies"] if policy["id"] == expected), None)
     citation = chosen["id"] if chosen else None
     outcome = "inconclusive" if chosen is None else (
         "pass" if citation == fixture["required_citation"] else "fail"
     )
+    snapshot = config.snapshot()
     return {
-        "config": vars(config),
-        "config_digest": digest(vars(config)),
+        "config": snapshot,
+        "config_digest": digest(snapshot),
         "citation": citation,
         "evidence": chosen,
         "outcome": outcome,
@@ -38,12 +54,17 @@ def evaluate(fixture, config):
 
 
 def retrieval_experiment(fixture, baseline, candidate, results):
-    intervention = replace(candidate, retrieval=baseline.retrieval)
-    experiment_id = digest([fixture, vars(baseline), vars(candidate), "restore_retrieval"])
+    return controlled_experiment(fixture, baseline, candidate, results, "restore_retrieval")
+
+
+def controlled_experiment(fixture, baseline, candidate, results, name):
+    setting = INTERVENTIONS[name]
+    intervention = replace(candidate, **{setting: getattr(baseline, setting)})
+    experiment_id = digest([fixture, baseline.snapshot(), candidate.snapshot(), name])
     if experiment_id not in results:
         results[experiment_id] = {
             "experiment_id": experiment_id,
-            "intervention": "restore_retrieval",
+            "intervention": name,
             **evaluate(fixture, intervention),
         }
     return results[experiment_id]

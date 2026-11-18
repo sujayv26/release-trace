@@ -4,14 +4,17 @@ import { Evidence, Status } from '../../../../components';
 import { type Investigation, readApi, ReleaseApiError, viewerToken } from '../../../../../lib/releases';
 
 const findings: Record<string, string> = {
-  restored_expected_citation: 'Restoring the stable retrieval setting brought back the expected citation.',
+  restored_expected_citation: 'The controlled rerun brought back the expected citation.',
   retrieval_settings_match: 'Both versions already use the same retrieval setting.',
-  rerun_did_not_establish_cause: 'The rerun did not establish that retrieval caused the failure.',
+  rerun_did_not_establish_cause: 'The rerun did not establish a cause for the failure.',
+  settings_match: 'The stable and candidate settings match.',
   experiment_budget_exhausted: 'The investigation reached its experiment limit.',
   planner_timeout: 'The investigation planner timed out.',
   planner_abstained: 'The planner found no suitable experiment.',
   unsupported_intervention: 'The proposed experiment is unavailable for this investigation.',
 };
+
+const settingNames: Record<string, string> = { retrieval: 'Retrieval', prompt: 'Prompt', tool_response: 'Recorded tool response' };
 
 export default async function InvestigationPage({ params }: {
   params: Promise<{ id: string; investigationId: string }>;
@@ -39,7 +42,7 @@ export default async function InvestigationPage({ params }: {
       {report ? <>
         <p>{findings[report.reason] ?? 'Review the saved evidence below.'}</p>
         <p>Expected citation <code>{report.required_citation}</code></p>
-        {report.changed_parameter && <p>Retrieval changed from <code>{report.changed_parameter.before}</code> to <code>{report.changed_parameter.after}</code>.</p>}
+        {report.changed_parameter && <p>{settingNames[report.changed_parameter.name] ?? report.changed_parameter.name} changed from <code>{report.changed_parameter.before}</code> to <code>{report.changed_parameter.after}</code>.</p>}
         <section className="panel investigation-comparison" aria-label="Investigation evidence">
           <Evidence label="Stable" variant={report.baseline} />
           <Evidence label="Candidate" variant={report.candidate} />

@@ -243,5 +243,9 @@ An investigation can support a diagnosis or return inconclusive. The release
 verdict is recorded separately.
 
 The worker runs this workflow with LangGraph and a scripted local planner. It
-can execute one approved retrieval rerun per investigation. This demo requires
+can execute one experiment per investigation. To also try a prompt regression,
+a stale recorded tool response, and an ambiguous failure, set
+`RELEASETRACE_EXTENDED_FIXTURES=1` before starting the API or Compose stack.
+Run `python -m service.seed_demo --extended` (via `docker compose exec -T api`
+when using Compose), then investigate cases in the new run. This demo requires
 no model credentials.
