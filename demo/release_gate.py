@@ -2,7 +2,10 @@
 import json
 from pathlib import Path
 
-from release_trace_demo import Config, digest, evaluate
+if __package__:
+    from .release_trace_demo import Config, digest, evaluate
+else:
+    from release_trace_demo import Config, digest, evaluate
 
 
 def apply_gate(requirements, results, minimum_score):
