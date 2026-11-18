@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import time
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
@@ -83,13 +84,16 @@ def observe_rollout(get, resource, submitted, container, image, promotion, timeo
     raise ValueError("Rollout outcome was not confirmed before the timeout. Use --observe again to resume.")
 
 
-def verify_build(image, commit, workflow):
+def verify_build(image, commit, workflow, bundle=None):
     repository = "/".join(workflow.split("/")[:2])
+    command = [
+        "gh", "attestation", "verify", f"oci://{image}", "--repo", repository,
+        "--signer-workflow", workflow, "--source-digest", commit,
+    ]
+    if bundle is not None:
+        command.extend(("--bundle", str(bundle.resolve())))
     try:
-        subprocess.run([
-            "gh", "attestation", "verify", f"oci://{image}", "--repo", repository,
-            "--signer-workflow", workflow, "--source-digest", commit,
-        ], check=True, timeout=60, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(command, check=True, timeout=60, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         raise ValueError("Build provenance verification failed for the approved image and commit") from None
 
@@ -105,6 +109,7 @@ def main():
     parser.add_argument("--apply", action="store_true", help="Update the Rollout image. The default previews the change.")
     parser.add_argument("--observe", type=int, metavar="SECONDS", help="Wait for and record promotion or abort")
     parser.add_argument("--attested-by", metavar="WORKFLOW", help="Require provenance from owner/repo/.github/workflows/build.yml")
+    parser.add_argument("--attestation-bundle", type=Path, metavar="PATH", help="Read the signed attestation bundle from disk")
     args = parser.parse_args()
     if not DELIVERY_ID.fullmatch(args.run_id) or any(
         len(value) > 253 or not RESOURCE_NAME.fullmatch(value)
@@ -115,6 +120,8 @@ def main():
         parser.error("--observe must be between 1 and 3600 seconds")
     if args.attested_by and not BUILD_WORKFLOW.fullmatch(args.attested_by):
         parser.error("--attested-by requires an owner/repo/.github/workflows/build.yml reference")
+    if args.attestation_bundle is not None and not args.attested_by:
+        parser.error("--attestation-bundle requires --attested-by")
     base = urlsplit(args.api_url)
     local = base.hostname in LOOPBACK or base.hostname == "::1"
     if (not base.hostname or base.username is not None or base.password is not None
@@ -148,7 +155,7 @@ def main():
             if args.observe is not None and patch and not args.apply:
                 raise ValueError("The candidate is not configured. Use --apply to start the canary.")
             if args.attested_by:
-                verify_build(image, promotion.candidate.commit_sha, args.attested_by)
+                verify_build(image, promotion.candidate.commit_sha, args.attested_by, args.attestation_bundle)
             if patch and args.apply:
                 rollout = json.loads(subprocess.check_output(
                     [*kubectl, "patch", resource, "--type=json",
@@ -170,6 +177,9 @@ def main():
     except ValueError as error:
         parser.exit(1, f"{error}\n")
     result = {"run_id": promotion.run_id, "image": image, "state": state}
+    if args.attested_by:
+        result["verified_build"] = {"workflow": args.attested_by, "commit_sha": promotion.candidate.commit_sha,
+                                    "image_digest": promotion.candidate.image_digest}
     if observation is not None:
         result["deployment"] = observation
     print(json.dumps(result))

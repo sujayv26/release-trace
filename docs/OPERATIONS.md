@@ -59,6 +59,7 @@ project file unless it is absolute.
       "installation_id": 67890,
       "organization": "support-team",
       "name": "Support application",
+      "github_repository": "example/support-app",
       "build_targets_file": "support-builds.json",
       "evaluation_file": "support-evaluation.json"
     }
@@ -89,9 +90,9 @@ webhook secret on the API. Rotate the secret on the API when it changes in
 GitHub. If an evaluation target requires authentication, configure
 `RELEASETRACE_BASELINE_EVALUATION_TOKEN_<repository_id>` and
 `RELEASETRACE_CANDIDATE_EVALUATION_TOKEN_<repository_id>` on the evaluation
-worker. Each GitHub Check publisher still uses its own repository and
-installation configuration. Run the existing publisher command per scope
-when publishing to multiple repositories.
+worker. Set `github_repository` on the managed entries that should publish
+Checks. A worker uses that project's repository ID and installation ID to
+scope each publication.
 
 Serve the hosted dashboard and webhook over HTTPS. Managed mode accepts only
 individual account keys. The database pins each managed repository to its
@@ -280,19 +281,32 @@ the GitHub Check.
 
 ### Publish build checks automatically
 
-Run `python -m service.store` to apply the Check tracking migration. Install a
-GitHub App with repository **Checks: write** on the selected repository. In the
-worker environment, set `RELEASETRACE_GITHUB_APP_ID`,
-`RELEASETRACE_GITHUB_REPOSITORY` (`owner/repo`),
-`RELEASETRACE_GITHUB_APP_KEY_FILE` (path to the App's private PEM on the server),
-and the same `RELEASETRACE_REPOSITORY_ID` and `RELEASETRACE_INSTALLATION_ID`
-used by the API. Keep the private key outside the repository.
+Run `python -m service.store` to apply migrations. Install the GitHub App with
+repository **Checks: write** on each selected repository. Set
+`RELEASETRACE_GITHUB_APP_ID` and `RELEASETRACE_GITHUB_APP_KEY_FILE` on the
+worker. Store the App's private PEM outside the repository. In managed mode,
+give the worker the same `RELEASETRACE_PROJECTS_FILE` and referenced files as
+the API. Include `github_repository` in each entry that should publish. The
+same App key can cover several installations. The worker requests a
+repository-scoped token per publication and checks that GitHub resolves the
+configured name to the saved repository ID before publishing. Entries that
+omit the name still support evaluations and review. Restart the worker after
+an operator changes the directory or App credentials.
+
+For the single-project configuration, set `RELEASETRACE_GITHUB_REPOSITORY`
+(`owner/repo`), `RELEASETRACE_REPOSITORY_ID`, and
+`RELEASETRACE_INSTALLATION_ID` on the worker instead of the managed directory.
 
 Start `python -m service.worker --publish-checks`. It publishes completed build
 checks for the configured repository, records the Check ID, and retries
 temporary failures. Earlier completed build deliveries are also eligible.
 Seeded demo deliveries and synthetic fixtures are preview-only in this worker.
 Use the automated publisher or the manual publishing command for a delivery.
+
+For the Render pilot, mount the project files and App PEM as worker secret
+files and set the worker command to `python -m service.worker --publish-checks`
+when the App is ready. A deployment that only runs evaluations can use the
+Blueprint's default worker command.
 
 ### Verify live GitHub App redelivery
 

@@ -3,18 +3,17 @@
 import argparse
 import json
 import os
-import re
 
 import httpx
 from sqlalchemy import select
 
+from .projects import valid_repository_name
 from .store import database, deliveries
 
 CHECK_NAME = "ReleaseTrace / Synthetic evaluation"
 BUILD_CHECK_NAME = "ReleaseTrace / Build evaluation"
 GITHUB_API = "https://api.github.com"
 GITHUB_HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2026-03-10"}
-REPOSITORY_NAME = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9_.-]{1,100}")
 
 
 def completed_run(engine, delivery_id, repository_id, installation_id):
@@ -66,7 +65,7 @@ def check_payload(run):
 
 
 def publish_check(client, repository_name, repository_id, app_id, payload):
-    if not REPOSITORY_NAME.fullmatch(repository_name) or repository_name.split("/")[1] in {".", ".."}:
+    if not valid_repository_name(repository_name):
         raise ValueError("Expected a GitHub repository in owner/name form")
     repository = f"/repos/{repository_name}"
     if client.get(repository).raise_for_status().json()["id"] != repository_id:

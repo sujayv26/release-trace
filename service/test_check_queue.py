@@ -5,12 +5,15 @@ import unittest
 from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 import jwt
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import create_engine, select, update
 
+from . import worker
 from .check_queue import GitHubApp, publish_one
 from .github_check import GITHUB_API
 from .schema import upgrade_database
@@ -92,3 +95,78 @@ class CheckQueueTest(unittest.TestCase):
                 run = connection.execute(select(deliveries).where(primary)).one()
                 self.assertEqual(run.github_check_id, 100)
                 self.assertIsNone(run.github_check_retry_at)
+
+    def test_managed_worker_publishes_only_configured_repository_scopes(self):
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as cleanup:
+            root = Path(directory)
+            url = os.getenv("RELEASETRACE_TEST_DATABASE_URL", f"sqlite:///{(root / 'checks.db').as_posix()}")
+            engine = create_engine(url)
+            cleanup.callback(engine.dispose)
+            upgrade_database(engine)
+            key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            key_file = root / "app.pem"
+            key_file.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                                   serialization.NoEncryption()))
+            scopes = {"alpha": (8101, 9101, "a" * 40), "beta": (8102, 9102, "b" * 40)}
+            directory_file = root / "projects.json"
+            directory_file.write_text(json.dumps({"projects": [
+                {"repository_id": repository, "installation_id": installation, "organization": name,
+                 "name": name, "github_repository": f"example/{name}"}
+                for name, (repository, installation, _) in scopes.items()
+            ] + [{"repository_id": 8103, "installation_id": 9103, "organization": "extra", "name": "Extra"}]}),
+                encoding="utf-8")
+
+            def delivery(name, repository, installation, sha):
+                return {"id": f"managed-check-{name}", "repository_id": repository, "installation_id": installation,
+                        "commit_sha": sha, "state": "completed", "inputs": {"evaluation_mode": "build_endpoints"},
+                        "report": {"evaluation_mode": "build_endpoints", "verdict": "pass",
+                                   "builds": {"candidate": {"commit_sha": sha, "image_digest": "sha256:" + "a" * 64}},
+                                   "candidate": {"score": 1, "critical_failures": [], "missing_evidence": []}}}
+
+            with engine.begin() as connection:
+                connection.execute(deliveries.insert(), [delivery(name, *scope) for name, scope in scopes.items()] + [
+                    delivery("other-installation", 8101, 9199, "c" * 40), delivery("disabled", 8103, 9103, "d" * 40),
+                ])
+            published = []
+
+            def respond(request):
+                path = request.url.path
+                token = request.headers["Authorization"].removeprefix("Bearer ")
+                if path.startswith("/app/installations/"):
+                    installation = int(path.split("/")[3])
+                    name, (repository, _, _) = next(item for item in scopes.items() if item[1][1] == installation)
+                    self.assertEqual(jwt.decode(token, key.public_key(), algorithms=["RS256"])["iss"], "80")
+                    self.assertEqual(json.loads(request.content), {"repository_ids": [repository],
+                                                                   "permissions": {"checks": "write"}})
+                    return httpx.Response(201, json={"token": f"token-{name}"})
+                name = path.split("/")[3]
+                repository, _, sha = scopes[name]
+                self.assertEqual(token, f"token-{name}")
+                prefix = f"/repos/example/{name}"
+                if path == prefix:
+                    return httpx.Response(200, json={"id": repository})
+                if path == f"{prefix}/commits/{sha}/check-runs":
+                    return httpx.Response(200, json={"check_runs": []})
+                self.assertEqual((request.method, path), ("POST", f"{prefix}/check-runs"))
+                payload = json.loads(request.content)
+                self.assertEqual((payload["external_id"], payload["head_sha"]), (f"managed-check-{name}", sha))
+                published.append(name)
+                return httpx.Response(201, json={"id": repository + 100})
+
+            env = {"RELEASETRACE_DATABASE_URL": url, "RELEASETRACE_PROJECTS_FILE": str(directory_file),
+                   "RELEASETRACE_GITHUB_APP_KEY_FILE": str(key_file), "RELEASETRACE_GITHUB_APP_ID": "80"}
+            with (
+                patch.dict(os.environ, env),
+                patch("sys.argv", ["worker", "--once", "--publish-checks"]),
+                patch("service.check_queue.github_client", return_value=httpx.Client(
+                    base_url=GITHUB_API, transport=httpx.MockTransport(respond))),
+            ):
+                worker.main()
+            self.assertEqual(published, ["alpha", "beta"])
+            with engine.connect() as connection:
+                rows = connection.execute(select(deliveries.c.id, deliveries.c.github_check_id).where(
+                    deliveries.c.id.startswith("managed-check-"),
+                ))
+                checks = {delivery_id: check_id for delivery_id, check_id in rows}
+            self.assertEqual(checks, {"managed-check-alpha": 8201, "managed-check-beta": 8202,
+                                      "managed-check-other-installation": None, "managed-check-disabled": None})

@@ -59,7 +59,16 @@ def main():
     parser.add_argument("--baseline", required=True, help="Registry reference pinned by digest")
     parser.add_argument("--candidate", required=True, help="Registry reference pinned by digest")
     parser.add_argument("--commit", required=True)
+    parser.add_argument("--attested-by")
+    parser.add_argument("--attestation-bundle")
     args = parser.parse_args()
+    if args.attestation_bundle and not args.attested_by:
+        parser.error("--attestation-bundle requires --attested-by")
+    attestation = []
+    if args.attested_by:
+        attestation.extend(("--attested-by", args.attested_by))
+    if args.attestation_bundle:
+        attestation.extend(("--attestation-bundle", args.attestation_bundle))
     baseline_repository, _, baseline_digest = args.baseline.partition("@")
     candidate_repository, _, candidate_digest = args.candidate.partition("@")
     if baseline_repository != candidate_repository or baseline_digest == candidate_digest:
@@ -157,10 +166,13 @@ def main():
             sys.executable, "-m", "staging.promote_approved", run_id,
             "--context", args.context, "--namespace", args.namespace,
             "--rollout", "approved-support", "--container", "support", "--apply", "--observe", "120",
-            env=environment, timeout=170,
+            *attestation, env=environment, timeout=220,
         ))
         require(submission["state"] == "submitted" and submission["image"] == args.candidate,
                 "The submitted image did not match the approved registry digest")
+        if args.attested_by:
+            require(submission["verified_build"] == {"workflow": args.attested_by, "commit_sha": args.commit,
+                                                     "image_digest": candidate_digest}, "Provenance did not match the approval")
         recorded = client.get(path).raise_for_status().json()["deployment"]
         require(recorded == submission["deployment"] and recorded["outcome"] == "promoted"
                 and recorded["stable_image_digest"] == candidate_digest,
@@ -199,6 +211,7 @@ with urlopen(request, timeout=3) as response:
             "baseline_hash": baseline_hash, "stable_hash": stable_hash,
             "stable_pod_image_ids": image_ids, "successful_analysis_runs": successful,
             "stable_service_citation": "account-closure-v2",
+            "verified_build": submission.get("verified_build"),
             "recorded_rollout": recorded,
         }, indent=2))
 

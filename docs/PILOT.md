@@ -68,7 +68,7 @@ The worker checks this configuration before making requests or attaching a beare
 | Order | Exercise | Evidence to save |
 |---|---|---|
 | 2 | Onboard two test projects with different suites and approved evaluation URLs. Give each reviewer access to one project. Attempt a cross-project read, revoke a test key, and evaluate a candidate URL missing from the approved map. | Two completed run IDs, a cross-project HTTP 404, a revoked-key HTTP 401, and an inconclusive run with `destination_not_approved`. Confirm the denied endpoint received zero requests. |
-| 3 | Install the GitHub App on a demo repository you control. Use the live redelivery checklist and a dedicated publisher configured for that installation. | The signed delivery ID, evaluated commit, Check ID, and proof that redelivery preserved both IDs. [Live GitHub verification](OPERATIONS.md#verify-live-github-app-redelivery) |
+| 3 | Install the GitHub App on a demo repository you control. Enable the worker publisher for that managed project and use the live redelivery checklist. | The signed delivery ID, evaluated commit, Check ID, and proof that redelivery preserved both IDs. [Live GitHub verification](OPERATIONS.md#verify-live-github-app-redelivery) |
 | 4 | Publish the candidate image and its build-provenance attestation from the trusted GitHub Actions workflow. Try promotion after the active build pair changes, then exercise healthy and unhealthy canaries for approved builds. | Stale-approval HTTP 409, the verified workflow and source commit, the approved and running digest, and a saved dashboard outcome for each rollout. |
 | 5 | Have a second operator onboard a test project, recover an interrupted evaluation, and restore evidence into an isolated PostgreSQL instance. | Onboarding record, detection and recovery times, one logical run and decision after recovery, and restored run, approval, and rollout IDs. |
 
@@ -85,6 +85,12 @@ python -m staging.promote_approved DELIVERY_ID \
   --namespace support --rollout support --container support \
   --attested-by OWNER/REPO/.github/workflows/build.yml --apply --observe 120
 ```
+
+Use `--attestation-bundle PATH` with `--attested-by` to verify a downloaded
+signed bundle. The canary workflow uses this path with its disposable
+registry. It signs the candidate digest in GitHub Actions, checks that a
+different commit and image are rejected, and saves the bundle and verified
+commit-to-digest mapping with the observed rollout.
 
 Use the healthy rehearsal to verify the stable workload runs the candidate
 digest. Use a staged health regression for the abort exercise and verify the

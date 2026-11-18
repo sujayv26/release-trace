@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from sqlalchemy import or_, select, update
 
 from .github_check import GITHUB_API, GITHUB_HEADERS, check_payload, publish_check
+from .projects import managed_projects, valid_repository_name
 from .store import deliveries
 
 logger = logging.getLogger(__name__)
@@ -29,17 +30,27 @@ class GitHubApp:
     key: RSAPrivateKey = field(repr=False)
 
     @classmethod
-    def from_environment(cls):
+    def configured(cls):
         key_file = Path(os.environ["RELEASETRACE_GITHUB_APP_KEY_FILE"])
         key = load_pem_private_key(key_file.read_bytes(), password=None)
         if not isinstance(key, RSAPrivateKey):
             raise ValueError("Expected an RSA private key")
-        ids = tuple(int(os.environ[name]) for name in (
-            "RELEASETRACE_GITHUB_APP_ID", "RELEASETRACE_INSTALLATION_ID", "RELEASETRACE_REPOSITORY_ID",
-        ))
-        if any(value <= 0 for value in ids):
+        app_id = int(os.environ["RELEASETRACE_GITHUB_APP_ID"])
+        if app_id <= 0:
             raise ValueError("Expected positive GitHub identifiers")
-        return cls(*ids, os.environ["RELEASETRACE_GITHUB_REPOSITORY"], key)
+        directory = os.getenv("RELEASETRACE_PROJECTS_FILE")
+        if directory:
+            apps = tuple(cls(app_id, project.installation_id, project.repository_id, project.github_repository, key)
+                         for project in managed_projects(directory).values() if project.github_repository)
+            if not apps:
+                raise ValueError("No managed projects have a GitHub repository name")
+            return apps
+        installation_id = int(os.environ["RELEASETRACE_INSTALLATION_ID"])
+        repository_id = int(os.environ["RELEASETRACE_REPOSITORY_ID"])
+        repository = os.environ["RELEASETRACE_GITHUB_REPOSITORY"]
+        if min(installation_id, repository_id) <= 0 or not valid_repository_name(repository):
+            raise ValueError("Expected positive GitHub identifiers and a repository in owner/name form")
+        return (cls(app_id, installation_id, repository_id, repository, key),)
 
     def installation_token(self, client):
         now = int(time())

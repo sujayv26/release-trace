@@ -1,17 +1,23 @@
 """Load the operator-managed organization and repository directory."""
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from .evaluate_builds import BuildTargets
 from .evaluation_config import EvaluationSnapshot, read_evaluation
 
 Role = Literal["viewer", "maintainer", "approver"]
 GitHubID = Annotated[int, Field(strict=True, gt=0, le=2**63 - 1)]
+REPOSITORY_NAME = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9_.-]{1,100}")
+
+
+def valid_repository_name(name):
+    return bool(REPOSITORY_NAME.fullmatch(name)) and name.split("/")[1] not in {".", ".."}
 
 
 class ProjectConfig(BaseModel):
@@ -23,6 +29,14 @@ class ProjectConfig(BaseModel):
     name: Annotated[str, Field(min_length=1, max_length=120)]
     build_targets_file: Path | None = None
     evaluation_file: Path | None = None
+    github_repository: str | None = None
+
+    @field_validator("github_repository")
+    @classmethod
+    def check_repository_name(cls, name):
+        if name is not None and not valid_repository_name(name):
+            raise ValueError("Expected a GitHub repository in owner/name form")
+        return name
 
 
 class ProjectDirectory(BaseModel):
@@ -38,6 +52,7 @@ class Project:
     name: str
     targets: BuildTargets | None
     evaluation: EvaluationSnapshot | None = None
+    github_repository: str | None = None
 
 
 def read_targets(path):
@@ -56,15 +71,22 @@ def managed_projects(path):
     except (OSError, ValidationError):
         raise ValueError("Invalid managed project file") from None
     projects = {}
+    repository_names = set()
     for entry in config.projects:
         if entry.repository_id in projects:
             raise ValueError("Each repository must appear only once in the managed project file")
+        if entry.github_repository:
+            name = entry.github_repository.lower()
+            if name in repository_names:
+                raise ValueError("Each GitHub repository name must appear only once in the managed project file")
+            repository_names.add(name)
         targets = read_targets(path.parent / entry.build_targets_file) if entry.build_targets_file else None
         if entry.evaluation_file and targets is None:
             raise ValueError("A project evaluation requires a build targets file")
         evaluation = read_evaluation(path.parent / entry.evaluation_file) if entry.evaluation_file else None
         projects[entry.repository_id] = Project(
             entry.repository_id, entry.installation_id, entry.organization, entry.name, targets, evaluation,
+            entry.github_repository,
         )
     return projects
 

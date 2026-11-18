@@ -17,19 +17,22 @@ def main():
     engine = database()
     with ExitStack() as stack:
         stack.callback(engine.dispose)
-        app = None
+        apps = ()
         if args.publish_checks:
             from .check_queue import GitHubApp, github_client, publish_one
 
             try:
-                app = GitHubApp.from_environment()
+                apps = GitHubApp.configured()
             except (KeyError, TypeError, ValueError, OSError):
-                parser.error("Could not load the GitHub App IDs, repository, or RSA key file")
+                parser.error("Could not load GitHub App publishing configuration. Check the IDs, project directory, and RSA key file.")
             client = stack.enter_context(github_client())
         while True:
             processed = None if args.auxiliary_only else process_one(engine)
             investigated = process_investigation(engine)
-            published = app is not None and publish_one(engine, app, client)
+            published = False
+            for app in apps:
+                if publish_one(engine, app, client):
+                    published = True
             if args.once:
                 return
             if processed is None and investigated is None and not published:
