@@ -1,39 +1,61 @@
-﻿# ReleaseTrace
+# ReleaseTrace
 
-ReleaseTrace helps teams review AI application releases. It runs the same policy cases against stable and candidate builds, blocks critical regressions, and gives reviewers evidence to investigate failures and approve the exact build they evaluated.
+**Release verification for AI applications, from a signed GitHub push to a canary rollout.** ReleaseTrace compares the stable and candidate builds on the same tests, explains why a critical regression blocked a release, and ties approval to the exact image that passed.
 
-[Technical skills and stack](#technical-skills-and-stack) · [Local demo](#run-the-local-demo) · [Verification and rollout evidence](#verification-and-rollout-evidence)
+[What I built](#what-i-built) · [See the workflow](#follow-a-release) · [Verification evidence](#verification-and-rollout-evidence) · [Technical skills](#technical-skills-and-stack) · [Run the demo](#run-the-local-demo)
+
+## What I built
+
+I designed and implemented ReleaseTrace end to end, including the evaluation policy, FastAPI backend, PostgreSQL persistence, reviewer dashboard, LangGraph investigation, GitHub integration, and CI and rollout workflows.
+
+| Engineering decision | Why it matters |
+|---|---|
+| **Gate critical cases individually** | A candidate can score 80% and still give users an outdated account-closure policy. That critical failure blocks the release. |
+| **Investigate with a controlled rerun** | The Investigator restores one retrieval setting and records whether the correct citation returns. A corrected build goes through a fresh evaluation. |
+| **Approve the tested artifact** | Approval records the candidate’s OCI image digest. The rollout rehearsal verifies that both stable Pods run that same digest after promotion. |
+| **Make retries safe** | GitHub redelivery reuses the queued delivery. The Temporal recovery test verifies that a worker replacement preserves a committed evaluation report. |
+
+## Follow a release
 
 ```mermaid
-flowchart TB
-    accTitle: ReleaseTrace review workflow
-    accDescr: A signed push triggers evaluation. The demo investigates a blocked candidate and approves a separate corrected candidate that passes.
-    Push["Signed GitHub push"] --> Evaluate["Evaluate stable and candidate"]
-    Evaluate --> Gate{"Release gate"}
-    Gate -->|Critical failure| Block["Blocked release"]
-    Gate -->|Passing corrected build| Review["Approver reviews the digest"]
-    Block --> Rerun["Run a controlled experiment"]
-    Review --> Decision["Save a digest-bound decision"]
-
-    classDef process fill:#dbeafe,stroke:#2563eb,color:#172554,stroke-width:1.5px
-    classDef decision fill:#fef3c7,stroke:#b45309,color:#451a03,stroke-width:1.5px
-    classDef blocked fill:#ffe4e6,stroke:#be123c,color:#4c0519,stroke-width:1.5px
-    classDef investigation fill:#ede9fe,stroke:#7c3aed,color:#2e1065,stroke-width:1.5px
-    classDef success fill:#dcfce7,stroke:#15803d,color:#052e16,stroke-width:1.5px
-
-    class Push,Evaluate process
-    class Gate decision
-    class Block blocked
-    class Rerun investigation
-    class Review,Decision success
+flowchart TD
+    Push["Signed GitHub push"] --> Eval["Evaluate stable and candidate"]
+    Eval --> Gate{"Release gate"}
+    Gate -->|Critical failure| Block["Review evidence and investigate"]
+    Block --> Fix["Push a corrected candidate"]
+    Fix --> Eval
+    Gate -->|Pass| Approve["Approve exact image digest"]
+    Approve --> Canary["Argo canary"]
+    Canary -->|Healthy| Promote["Promote candidate"]
+    Canary -->|Unhealthy| Abort["Abort and verify stable service"]
 ```
 
 <details>
-<summary>Why does the first release stay blocked after the rerun succeeds?</summary>
+<summary><strong>What happens when the candidate scores 80%?</strong></summary>
 
-The rerun restores the stable retrieval setting for one case and explains the regression. The original evaluation still records the failed critical case. The corrected build gets its own evaluation and decision.
+The stable build answers all five demo questions correctly. The candidate answers four correctly and cites an outdated policy on the critical account-closure case. A maintainer opens the failed case, compares the two answers, and runs the investigation. The current citation returns when the stable retrieval setting is restored. The original run remains blocked and the corrected build gets its own verdict.
 
 </details>
+
+<details>
+<summary><strong>How is it built?</strong></summary>
+
+FastAPI verifies signed deliveries and persists work in PostgreSQL. A background worker evaluates both versions and applies the release policy. Next.js renders the evidence and approval UI. LangGraph runs the bounded investigation, and the GitHub publisher reports the verdict on the evaluated commit. An operator submits the approved digest to Argo Rollouts for canary analysis.
+
+[System architecture and delivery flow](docs/ARCHITECTURE.md)
+
+</details>
+
+## Verification and rollout evidence
+
+| What was verified | Result | Evidence |
+|---|---|---|
+| **Release review and worker recovery** | CI exercised signed input, duplicate delivery, a blocked release, a controlled rerun, a protected approval, and Temporal worker replacement. | [CI run](https://github.com/sujayv26/release-trace/actions/runs/44294539695) |
+| **Approved artifact promoted** | CI evaluated two registry images and verified that both stable Pods ran the approved OCI digest after promotion. | [Rollout run](https://github.com/sujayv26/release-trace/actions/runs/44301532495) |
+| **Unhealthy canary aborted** | In one isolated kind drill, Argo detected HTTP 503 after **5.30 s**. The stable service was verified **0.22 s** after detection. The healthy revision promoted in **6.69 s**. | [Canary run and JSON artifact](https://github.com/sujayv26/release-trace/actions/runs/44293631233) |
+| **Investigator benchmarked** | Both offline methods correctly diagnosed **3 of 4 diagnosable cases**. Across six total cases, the rule made one incorrect diagnosis and the scripted Investigator made zero, using four reruns. | [Benchmark and error analysis](docs/ReleaseTrace-Agent-Build-Guide.md#5-benchmark-the-contribution) |
+
+The verified scope includes a single configured repository, a synthetic Compose demo, and a CI rehearsal with real registry images and a locally signed delivery. Live GitHub App delivery and hosted-model measurements are open. [Implementation status](docs/IMPLEMENTATION_PLAN.md)
 
 ## Technical skills and stack
 
@@ -86,17 +108,6 @@ docker compose -f compose.yaml -f compose.approval.yaml exec -T api python -m se
 ```
 
 Stop the base stack with `docker compose down`. If you enabled approvals, use `docker compose -f compose.yaml -f compose.approval.yaml down`. The named database volume retains the runs.
-
-## Verification and rollout evidence
-
-- **Release review.** CI passed the signed webhook and duplicate-delivery checks, blocked release, controlled rerun, passing evaluation, and protected approval. It also passed PostgreSQL integration, dashboard build, and the Temporal worker-replacement test. [ReleaseTrace CI](https://github.com/sujayv26/release-trace/actions/runs/44294539695)
-- **Approved image rollout.** CI evaluated two real registry images, approved the candidate digest, submitted it to Argo, and verified that both stable Pods ran that digest. The stable Service returned the current account-closure citation after promotion. [Approval-to-rollout rehearsal and evidence](https://github.com/sujayv26/release-trace/actions/runs/44301532495)
-- **Canary drill.** In one isolated kind run, Argo promoted the healthy revision in **6.69 s**. It detected HTTP 503 from the unhealthy canary in **5.30 s** and verified the stable service **0.22 s** after detection. The workflow publishes the JSON evidence as an artifact. [Canary run and artifact](https://github.com/sujayv26/release-trace/actions/runs/44293631233)
-- **Investigator holdout.** Both offline methods diagnosed three of four diagnosable cases. The rule made one incorrect diagnosis across six cases. The scripted Investigator made zero and used four controlled reruns. [Benchmark and error analysis](docs/ReleaseTrace-Agent-Build-Guide.md#5-benchmark-the-contribution)
-
-The Compose walkthrough uses synthetic build identities. The [Argo rehearsal](docs/OPERATIONS.md#rehearse-the-complete-path-in-ci) uses real OCI digests and a locally signed delivery. Live GitHub App delivery and hosted model measurements remain open.
-
-See the [system design and delivery lifecycle](docs/ARCHITECTURE.md) for the service boundaries, or expand the [canary decision flow](docs/OPERATIONS.md#run-the-staging-canary-drill) to see what the drill checks.
 
 ## Run without Docker
 
