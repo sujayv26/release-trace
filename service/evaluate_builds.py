@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+from time import monotonic
 from typing import Annotated
 
 import httpx
@@ -13,6 +14,7 @@ from demo.release_gate import evaluate_suite
 
 FIXTURES = Path(__file__).resolve().parents[1] / "demo"
 MAX_RESPONSE_BYTES = 16_384
+RESPONSE_TIMEOUT = 5
 LOOPBACK = {"localhost", "127.0.0.1", "[::1]"}
 CommitSHA = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
@@ -57,12 +59,16 @@ def score_case(client, target, case, token=None):
         return {"outcome": "inconclusive", "citation": None, "evidence": None, "reason": reason}
 
     try:
+        deadline = monotonic() + RESPONSE_TIMEOUT
         with client.stream("POST", str(target.url), json=request, headers=headers) as response:
             response.raise_for_status()
             if response.headers.get("Content-Encoding", "identity").lower() != "identity":
                 return missing("unsupported_encoding")
             body = bytearray()
-            for chunk in response.iter_bytes(chunk_size=4096):
+            chunks = (response.content,) if response.is_stream_consumed else response.iter_raw()
+            for chunk in chunks:
+                if monotonic() > deadline:
+                    return missing("endpoint_timeout")
                 if len(body) + len(chunk) > MAX_RESPONSE_BYTES:
                     return missing("response_too_large")
                 body.extend(chunk)
@@ -104,6 +110,13 @@ def evaluate_builds(client, targets, fixture, suite, tokens=None):
     }
 
 
+def evaluate_configured_builds(targets, fixture, suite):
+    tokens = {variant: os.getenv(f"RELEASETRACE_{variant.upper()}_EVALUATION_TOKEN")
+              for variant in ("baseline", "candidate")}
+    with httpx.Client(timeout=RESPONSE_TIMEOUT, follow_redirects=False, trust_env=False) as client:
+        return evaluate_builds(client, targets, fixture, suite, tokens)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("targets", type=Path, help="JSON file listing baseline and candidate endpoints and build identities")
@@ -115,10 +128,7 @@ def main():
 
     fixture = json.loads((FIXTURES / "fixture.json").read_text(encoding="utf-8"))
     suite = json.loads((FIXTURES / "gate_suite.json").read_text(encoding="utf-8"))
-    tokens = {variant: os.getenv(f"RELEASETRACE_{variant.upper()}_EVALUATION_TOKEN")
-              for variant in ("baseline", "candidate")}
-    with httpx.Client(timeout=5, follow_redirects=False, trust_env=False) as client:
-        report = evaluate_builds(client, targets, fixture, suite, tokens)
+    report = evaluate_configured_builds(targets, fixture, suite)
     print(json.dumps(report, indent=2))
     return {"pass": 0, "block": 1, "inconclusive": 2}[report["verdict"]]
 

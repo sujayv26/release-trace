@@ -1,4 +1,4 @@
-"""Preview or publish a check for a completed fixture evaluation."""
+"""Preview or publish a check for a completed evaluation."""
 
 import argparse
 import json
@@ -11,6 +11,7 @@ from sqlalchemy import select
 from .store import database, deliveries
 
 CHECK_NAME = "ReleaseTrace / Synthetic evaluation"
+BUILD_CHECK_NAME = "ReleaseTrace / Build evaluation"
 REPOSITORY_NAME = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9_.-]{1,100}")
 
 
@@ -29,21 +30,36 @@ def completed_run(engine, delivery_id, repository_id, installation_id):
 
 def check_payload(run):
     candidate = run.report["candidate"]
-    summary = [
-        "Results cover the synthetic fixture suite. The commit SHA identifies the push that triggered it.",
-        f"Fixture gate: **{candidate['verdict']}**. Cases passed: **{candidate['score']:.0%}**.",
-    ]
+    if run.report.get("evaluation_mode") == "build_endpoints":
+        build = run.report["builds"]["candidate"]
+        if build["commit_sha"] != run.commit_sha:
+            raise ValueError("Evaluated candidate does not match the delivery commit")
+        verdict = run.report["verdict"]
+        name, title = BUILD_CHECK_NAME, "Application build evaluation"
+        conclusion = {"pass": "success", "block": "failure", "inconclusive": "failure"}[verdict]
+        summary = [
+            f"Release gate: **{verdict}**. Candidate cases passed: **{candidate['score']:.0%}**.",
+            f"Candidate image: `{build['image_digest']}`.",
+        ]
+        if run.report.get("reason") == "baseline_not_verified":
+            summary.append("The stable build did not clear the release gate.")
+    else:
+        name, title, conclusion = CHECK_NAME, "Synthetic fixture evaluation", "neutral"
+        summary = [
+            "Results cover the synthetic fixture suite. The commit SHA identifies the push that triggered it.",
+            f"Fixture gate: **{candidate['verdict']}**. Cases passed: **{candidate['score']:.0%}**.",
+        ]
     if candidate["critical_failures"]:
         summary.append("Critical failures: " + ", ".join(candidate["critical_failures"]))
     if candidate["missing_evidence"]:
         summary.append("Cases missing evidence: " + ", ".join(candidate["missing_evidence"]))
     return {
-        "name": CHECK_NAME,
+        "name": name,
         "head_sha": run.commit_sha,
         "external_id": run.id,
         "status": "completed",
-        "conclusion": "neutral",
-        "output": {"title": "Synthetic fixture evaluation", "summary": "\n\n".join(summary)},
+        "conclusion": conclusion,
+        "output": {"title": title, "summary": "\n\n".join(summary)},
     }
 
 
@@ -74,7 +90,7 @@ def publish_check(client, repository_name, repository_id, app_id, payload):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("delivery_id")
-    parser.add_argument("--publish", action="store_true", help="Publish the neutral check to GitHub")
+    parser.add_argument("--publish", action="store_true", help="Publish the check to GitHub")
     args = parser.parse_args()
     try:
         repository_id = int(os.environ["RELEASETRACE_REPOSITORY_ID"])

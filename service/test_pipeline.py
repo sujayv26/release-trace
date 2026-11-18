@@ -8,15 +8,82 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 from fastapi.testclient import TestClient
 
 from .api import create_app
-from .github_check import check_payload, completed_run
+from .evaluate_builds import FIXTURES, BuildTargets, evaluate_builds
+from .github_check import BUILD_CHECK_NAME, check_payload, completed_run
 from .schema import upgrade_database
 from .store import database, enqueue, process_one
 
 
 class PipelineTest(unittest.TestCase):
+    def test_build_push_persists_scoped_result_and_check(self):
+        path = FIXTURES / "build_targets.json"
+        pinned = BuildTargets.model_validate_json(path.read_bytes())
+        sha = pinned.candidate.build.commit_sha
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as cleanup:
+            db_path = Path(directory, "builds.db").as_posix()
+            with patch.dict(os.environ, {
+                "RELEASETRACE_DATABASE_URL": os.getenv("RELEASETRACE_TEST_DATABASE_URL", f"sqlite:///{db_path}"),
+                "RELEASETRACE_WEBHOOK_SECRET": "test-secret",
+                "RELEASETRACE_READ_TOKEN": "test-token",
+                "RELEASETRACE_REPOSITORY_ID": "41",
+                "RELEASETRACE_INSTALLATION_ID": "42",
+                "RELEASETRACE_BUILD_TARGETS_FILE": str(path),
+            }):
+                engine = database()
+                cleanup.callback(engine.dispose)
+                upgrade_database(engine)
+                with TestClient(create_app()) as client:
+                    def push(commit):
+                        body = json.dumps({
+                            "after": commit, "ref": "refs/heads/main", "deleted": False,
+                            "repository": {"id": 41}, "installation": {"id": 42},
+                        }).encode()
+                        response = client.post("/webhooks/github", content=body, headers={
+                            "X-GitHub-Event": "push", "X-GitHub-Delivery": "build-1",
+                            "X-Hub-Signature-256": "sha256=" + hmac.digest(b"test-secret", body, "sha256").hex(),
+                        })
+                        self.assertEqual(response.status_code, 202)
+                        return response.json()["status"]
+
+                    self.assertEqual(push("a" * 40), "ignored")
+                    self.assertIsNone(process_one(engine))
+                    self.assertEqual(push(sha), "queued")
+                    self.assertEqual(push(sha), "duplicate")
+                    auth = {"Authorization": "Bearer test-token"}
+                    detail = "/v1/runs/build-1"
+                    self.assertEqual(client.get(detail, headers=auth).json()["evaluation_mode"], "build_endpoints")
+
+                    def run_pinned(targets, fixture, suite):
+                        self.assertEqual(targets, pinned)
+                        cases = {case["case_id"]: case for case in [fixture, *suite["cases"]]}
+
+                        def respond(request):
+                            case = cases[json.loads(request.content)["case_id"]]
+                            is_candidate = request.url.port == 8102
+                            target = targets.candidate if is_candidate else targets.baseline
+                            citation = "account-closure-v1" if is_candidate and case["critical"] else case["required_citation"]
+                            return httpx.Response(200, json={"build": target.build.model_dump(), "citation": citation})
+
+                        with httpx.Client(transport=httpx.MockTransport(respond)) as evaluator:
+                            return evaluate_builds(evaluator, targets, fixture, suite)
+
+                    with patch("service.store.evaluate_configured_builds", side_effect=run_pinned):
+                        self.assertEqual(process_one(engine), "build-1")
+                    self.assertIsNone(process_one(engine))
+                    history = client.get("/v1/projects/41/runs", headers=auth).json()["items"]
+                    self.assertEqual([(run["verdict"], run["evaluation_mode"]) for run in history], [("block", "build_endpoints")])
+                    result = client.get(detail, headers=auth).json()
+                    self.assertEqual(result["report"]["builds"]["candidate"], pinned.candidate.build.model_dump())
+                    self.assertNotIn("127.0.0.1", json.dumps(result))
+                    failing = client.get(f"{detail}/cases?outcome=fail", headers=auth).json()["items"]
+                    self.assertEqual(failing[0]["candidate"]["citation"], "account-closure-v1")
+                    check = check_payload(completed_run(engine, "build-1", 41, 42))
+                    self.assertEqual((check["name"], check["head_sha"], check["conclusion"]), (BUILD_CHECK_NAME, sha, "failure"))
+
     def test_signed_delivery_produces_one_scoped_report(self):
         with tempfile.TemporaryDirectory() as directory, ExitStack() as cleanup:
             db_path = Path(directory, "releases.db").as_posix()
@@ -26,6 +93,7 @@ class PipelineTest(unittest.TestCase):
                 "RELEASETRACE_READ_TOKEN": "test-token",
                 "RELEASETRACE_REPOSITORY_ID": "1",
                 "RELEASETRACE_INSTALLATION_ID": "2",
+                "RELEASETRACE_BUILD_TARGETS_FILE": "",
             }):
                 engine = database()
                 cleanup.callback(engine.dispose)

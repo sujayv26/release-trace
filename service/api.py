@@ -1,4 +1,4 @@
-"""Accept signed GitHub pushes for one configured fixture project."""
+"""Accept signed GitHub pushes for one configured project."""
 
 import hmac
 import json
@@ -15,10 +15,11 @@ from fastapi import Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, StrictInt, ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
+from .evaluate_builds import BuildTargets
 from .store import database, deliveries, enqueue
 
 MAX_BODY = 1024 * 1024
@@ -46,6 +47,7 @@ class Accepted(BaseModel):
 
 Verdict = Literal["pass", "block", "inconclusive"]
 Outcome = Literal["pass", "fail", "inconclusive"]
+EvaluationMode = Literal["synthetic_fixture", "build_endpoints"]
 PageSize = Annotated[int, Query(ge=1, le=100)]
 Cursor = Annotated[str | None, Query(min_length=1, max_length=128)]
 
@@ -56,8 +58,9 @@ class RunSummary(BaseModel):
     state: str
     baseline_verdict: Verdict | None
     candidate_verdict: Verdict | None
+    verdict: Verdict | None
     created_at: datetime | None
-    evaluation_mode: Literal["synthetic_fixture"] = "synthetic_fixture"
+    evaluation_mode: EvaluationMode
 
 
 class RunPage(BaseModel):
@@ -72,11 +75,12 @@ class PolicyEvidence(BaseModel):
 
 
 class CaseVariant(BaseModel):
-    config: dict[str, str]
-    config_digest: str
+    config: dict[str, str] | None = None
+    config_digest: str | None = None
     citation: str | None
     evidence: PolicyEvidence | None
     outcome: Outcome
+    reason: str | None = None
 
 
 class CaseComparison(BaseModel):
@@ -129,6 +133,15 @@ def create_app():
         "fixture": json.loads((demo / "fixture.json").read_text(encoding="utf-8")),
         "suite": json.loads((demo / "gate_suite.json").read_text(encoding="utf-8")),
     }
+    targets_path = os.getenv("RELEASETRACE_BUILD_TARGETS_FILE")
+    targets = None
+    if targets_path:
+        try:
+            targets = BuildTargets.model_validate_json(Path(targets_path).read_bytes())
+        except (OSError, ValidationError):
+            raise ValueError("Invalid configured build target file") from None
+        inputs.update(evaluation_mode="build_endpoints", build_targets=targets.model_dump(mode="json"))
+
     @asynccontextmanager
     async def lifespan(app):
         try:
@@ -141,6 +154,7 @@ def create_app():
         deliveries.c.repository_id == repository,
         deliveries.c.installation_id == installation,
     )
+    mode = func.coalesce(deliveries.c.inputs["evaluation_mode"].as_string(), "synthetic_fixture").label("evaluation_mode")
 
     def require_read(request: Request):
         provided = request.headers.get("authorization", "").encode()
@@ -206,6 +220,8 @@ def create_app():
             return Accepted(status="ignored", delivery_id=delivery_id)
         if not COMMIT_SHA.fullmatch(push.after) or push.after == "0" * 40:
             return error(400, "invalid_commit", "Invalid GitHub commit SHA", request_id)
+        if targets is not None and push.after != targets.candidate.build.commit_sha:
+            return Accepted(status="ignored", delivery_id=delivery_id)
         status = await run_in_threadpool(
             enqueue, engine, delivery_id, repository, installation, push.after, inputs,
         )
@@ -217,10 +233,13 @@ def create_app():
     def run_history(project_id: int, limit: PageSize = 25, after: Cursor = None) -> RunPage:
         if project_id != repository:
             raise ReadError(404, "project_missing", "Project was not found")
+        candidate_verdict = deliveries.c.report["candidate"]["verdict"].as_string()
         query = select(
             deliveries.c.id, deliveries.c.commit_sha, deliveries.c.state, deliveries.c.created_at,
             deliveries.c.report["baseline"]["verdict"].as_string().label("baseline_verdict"),
-            deliveries.c.report["candidate"]["verdict"].as_string().label("candidate_verdict"),
+            candidate_verdict.label("candidate_verdict"),
+            func.coalesce(deliveries.c.report["verdict"].as_string(), candidate_verdict).label("verdict"),
+            mode,
         ).where(*scope)
         if after is not None:
             if not DELIVERY_ID.fullmatch(after):
@@ -235,13 +254,12 @@ def create_app():
     def run_detail(delivery_id: str):
         result = load_run(
             delivery_id, deliveries.c.id, deliveries.c.commit_sha, deliveries.c.state, deliveries.c.report,
-            deliveries.c.created_at, deliveries.c.completed_at,
+            deliveries.c.created_at, deliveries.c.completed_at, mode,
         )
         return {
             **result,
             "created_at": as_utc(result["created_at"]),
             "completed_at": as_utc(result["completed_at"]),
-            "evaluation_mode": "synthetic_fixture",
         }
 
     @app.get("/v1/runs/{delivery_id}/cases", dependencies=[Depends(require_read)])

@@ -1,4 +1,4 @@
-"""Consume queued fixture evaluations."""
+"""Consume queued release evaluations."""
 
 import argparse
 import time

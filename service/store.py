@@ -1,4 +1,4 @@
-"""Persist GitHub deliveries and their fixture evaluation results."""
+"""Persist GitHub deliveries and their evaluation results."""
 
 import os
 from datetime import datetime, timezone
@@ -9,6 +9,8 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 
 from demo.release_gate import run_suite
+
+from .evaluate_builds import BuildTargets, evaluate_configured_builds
 
 metadata = MetaData()
 deliveries = Table(
@@ -53,7 +55,7 @@ def enqueue(engine, delivery_id, repository, installation, sha, inputs):
 
 
 def process_one(engine):
-    # Keep the claim and fixture result in one transaction. A worker crash rolls
+    # Keep the claim and result in one transaction. A worker crash rolls
     # back the claim, so the next worker can process the same delivery.
     with engine.begin() as connection:
         job = connection.execute(select(deliveries).where(
@@ -66,7 +68,12 @@ def process_one(engine):
         ).values(state="running"))
         if claimed.rowcount != 1:
             return None
-        report = run_suite(job.inputs["fixture"], job.inputs["suite"])
+        fixture, suite = job.inputs["fixture"], job.inputs["suite"]
+        if job.inputs.get("evaluation_mode") == "build_endpoints":
+            targets = BuildTargets.model_validate(job.inputs["build_targets"])
+            report = evaluate_configured_builds(targets, fixture, suite)
+        else:
+            report = run_suite(fixture, suite)
         connection.execute(update(deliveries).where(deliveries.c.id == job.id).values(
             state="completed", report=report, completed_at=datetime.now(timezone.utc),
         ))
