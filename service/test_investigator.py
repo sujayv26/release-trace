@@ -3,8 +3,10 @@ import unittest
 from unittest.mock import Mock, patch
 
 from demo.release_gate import run_suite
+from demo.release_trace_demo import Config, INTERVENTIONS, controlled_experiment, evaluate
 
 from .evaluate_builds import FIXTURES
+from .investigation_benchmark import benchmark
 from .investigator import investigate
 
 
@@ -68,3 +70,20 @@ class InvestigatorTest(unittest.TestCase):
         self.assertEqual(ambiguous["outcome"], "inconclusive")
         self.assertEqual(ambiguous["reason"], "planner_abstained")
         self.assertIsNone(ambiguous["experiment"])
+
+    def test_holdout_labels_and_benchmark_counts(self):
+        dataset = json.loads((FIXTURES / "investigation_holdout.json").read_bytes())
+        for entry in dataset["cases"]:
+            fixture = entry["fixture"]
+            with self.subTest(case=fixture["case_id"]):
+                stable, candidate = (Config(**fixture[name]) for name in ("baseline", "candidate"))
+                self.assertEqual(evaluate(fixture, candidate)["outcome"], "fail")
+                fixes = [name for name in INTERVENTIONS if controlled_experiment(fixture, stable, candidate, {}, name)["outcome"] == "pass"]
+                self.assertEqual(fixes, [entry["expected"]] if entry["expected"] else [])
+
+        methods = benchmark(dataset)["methods"]
+        rule = methods["single_change_rule"]
+        graph = methods["scripted_investigator"]
+        self.assertEqual((rule["correct_diagnoses"], rule["incorrect_diagnoses"], rule["correct_abstentions"]), (3, 1, 1))
+        self.assertEqual((graph["correct_diagnoses"], graph["incorrect_diagnoses"], graph["correct_abstentions"]), (3, 0, 2))
+        self.assertEqual((graph["diagnosable"], graph["abstentions"], graph["experiments"]), (4, 3, 4))

@@ -82,6 +82,10 @@ When candidate behavior is stochastic, record repeats for both candidate and int
 
 ## 5. Benchmark the contribution
 
+The first offline benchmark is in [`demo/investigation_holdout.json`](../demo/investigation_holdout.json). Run `python -m service.investigation_benchmark` to compare the scripted Investigator with its decision rule alone. Expected labels stay in the benchmark harness. These six synthetic cases measure citation diagnosis under the fixture scorer. Hosted one-shot and tool-using models remain to be measured.
+
+On `synthetic-holdout-v1`, both methods correctly diagnosed three of four diagnosable cases. The rule made one wrong diagnosis in the tax form case, where the expected policy was absent. The Investigator used four experiments and correctly abstained on that case. Both methods abstained on the diagnosable membership case when the prompt and retrieval settings changed together.
+
 - Build development fixtures for outdated retrieval, prompt changes, and incorrect tool arguments or responses. Include clean releases, ambiguous failures, and missing-evidence examples.
 - Group variants of the same fault together when splitting development and held-out cases. Freeze the held-out revision and label expected diagnoses outside the agent inputs.
 - Compare three approaches: deterministic triage rules, a one-shot LLM, and the tool-using agent. Use the same starting evidence for each. Use the same model for both LLM approaches and document the difference in tool access and budget.
@@ -101,5 +105,5 @@ When candidate behavior is stochastic, record repeats for both candidate and int
 ## 7. Next implementation step
 
 ```text
-Prepare a held-out split, compare the scripted planner against a one-shot model and a tool-using model, and report errors and abstentions. Preserve the existing investigation API and independent release verdict.
+Use the frozen holdout as the first input to a one-shot model and a tool-using model. Report diagnosis errors, abstentions, and per-case model usage. Preserve the existing investigation API and independent release verdict.
 ```

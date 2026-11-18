@@ -1,0 +1,197 @@
+{
+  "revision": "synthetic-holdout-v1",
+  "cases": [
+    {
+      "expected": "restore_retrieval",
+      "fixture": {
+        "case_id": "download-invoice",
+        "question": "Where can I download my invoice?",
+        "critical": true,
+        "baseline": {
+          "prompt": "billing",
+          "retrieval": "newest"
+        },
+        "candidate": {
+          "prompt": "billing",
+          "retrieval": "oldest"
+        },
+        "required_citation": "invoice-v2",
+        "policies": [
+          {
+            "id": "invoice-v1",
+            "revision": 1,
+            "text": "Download your invoice from the billing email."
+          },
+          {
+            "id": "invoice-v2",
+            "revision": 2,
+            "text": "Download your invoice from the billing portal."
+          }
+        ]
+      }
+    },
+    {
+      "expected": "restore_prompt",
+      "fixture": {
+        "case_id": "update-address",
+        "question": "Where can I update my address?",
+        "critical": true,
+        "baseline": {
+          "prompt": "profile-current",
+          "retrieval": "newest"
+        },
+        "candidate": {
+          "prompt": "profile-legacy",
+          "retrieval": "newest"
+        },
+        "required_citation": "address-v2",
+        "policies": [
+          {
+            "id": "address-v1",
+            "revision": 1,
+            "text": "Update your address through support."
+          },
+          {
+            "id": "address-v2",
+            "revision": 2,
+            "text": "Update your address in your profile."
+          }
+        ],
+        "citation_by_setting": {
+          "setting": "prompt",
+          "citations": {
+            "profile-current": "address-v2",
+            "profile-legacy": "address-v1"
+          }
+        }
+      }
+    },
+    {
+      "expected": "replay_tool_response",
+      "fixture": {
+        "case_id": "check-warranty",
+        "question": "How can I check my warranty?",
+        "critical": true,
+        "baseline": {
+          "prompt": "coverage",
+          "retrieval": "newest",
+          "tool_response": "coverage-current"
+        },
+        "candidate": {
+          "prompt": "coverage",
+          "retrieval": "newest",
+          "tool_response": "coverage-stale"
+        },
+        "required_citation": "warranty-v2",
+        "policies": [
+          {
+            "id": "warranty-v1",
+            "revision": 1,
+            "text": "Check your warranty using the packaging insert."
+          },
+          {
+            "id": "warranty-v2",
+            "revision": 2,
+            "text": "Check your warranty in the device portal."
+          }
+        ],
+        "citation_by_setting": {
+          "setting": "tool_response",
+          "citations": {
+            "coverage-current": "warranty-v2",
+            "coverage-stale": "warranty-v1"
+          }
+        }
+      }
+    },
+    {
+      "expected": "restore_prompt",
+      "fixture": {
+        "case_id": "pause-membership",
+        "question": "How do I pause my membership?",
+        "critical": true,
+        "baseline": {
+          "prompt": "member-current",
+          "retrieval": "newest"
+        },
+        "candidate": {
+          "prompt": "member-old",
+          "retrieval": "oldest"
+        },
+        "required_citation": "pause-v2",
+        "policies": [
+          {
+            "id": "pause-v1",
+            "revision": 1,
+            "text": "Pause membership by phone."
+          },
+          {
+            "id": "pause-v2",
+            "revision": 2,
+            "text": "Pause membership in Settings."
+          }
+        ],
+        "citation_by_setting": {
+          "setting": "prompt",
+          "citations": {
+            "member-current": "pause-v2",
+            "member-old": "pause-v1"
+          }
+        }
+      }
+    },
+    {
+      "expected": null,
+      "fixture": {
+        "case_id": "download-tax-form",
+        "question": "Where can I download a tax form?",
+        "critical": true,
+        "baseline": {
+          "prompt": "tax",
+          "retrieval": "newest"
+        },
+        "candidate": {
+          "prompt": "tax",
+          "retrieval": "oldest"
+        },
+        "required_citation": "tax-v3",
+        "policies": [
+          {
+            "id": "tax-v1",
+            "revision": 1,
+            "text": "Download the tax form from an email."
+          },
+          {
+            "id": "tax-v2",
+            "revision": 2,
+            "text": "Download the tax form from account documents."
+          }
+        ]
+      }
+    },
+    {
+      "expected": null,
+      "fixture": {
+        "case_id": "repair-booking",
+        "question": "Where can I book a repair?",
+        "critical": true,
+        "baseline": {
+          "prompt": "repair",
+          "retrieval": "newest"
+        },
+        "candidate": {
+          "prompt": "repair",
+          "retrieval": "newest"
+        },
+        "required_citation": "repair-v2",
+        "policies": [
+          {
+            "id": "repair-v1",
+            "revision": 1,
+            "text": "Book a repair from the support portal."
+          }
+        ]
+      }
+    }
+  ]
+}

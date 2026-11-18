@@ -249,3 +249,13 @@ a stale recorded tool response, and an ambiguous failure, set
 Run `python -m service.seed_demo --extended` (via `docker compose exec -T api`
 when using Compose), then investigate cases in the new run. This demo requires
 no model credentials.
+
+### Measure the Investigator locally
+
+Run `python -m service.investigation_benchmark` for the versioned synthetic
+holdout report. It compares a rule that names the only changed setting with
+the scripted Investigator, which can run one experiment before diagnosing.
+The frozen suite covers six cases across different support topics than the
+development fixtures. Four have a known single-setting fix. A `null` label
+means abstention is expected. The report includes the dataset fingerprint,
+per-case findings, diagnosis and abstention counts, and experiments executed.

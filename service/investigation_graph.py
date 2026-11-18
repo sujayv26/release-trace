@@ -20,6 +20,12 @@ class CaseEvidence:
     candidate_outcome: str
 
 
+def inspect_case(stable: Config, candidate: Config, report) -> CaseEvidence:
+    available = tuple(name for name, setting in INTERVENTIONS.items()
+                      if getattr(stable, setting) != getattr(candidate, setting))
+    return CaseEvidence(available, report["baseline"]["outcome"], report["candidate"]["outcome"])
+
+
 def scripted_planner(evidence: CaseEvidence) -> str:
     if len(evidence.available_interventions) == 1 and evidence.candidate_outcome == "fail":
         return evidence.available_interventions[0]
@@ -43,9 +49,8 @@ class State(TypedDict):
 def choose_experiment(state: State, runtime: Runtime[InvestigationContext]):
     context = runtime.context
     report = state["report"]
-    available = tuple(name for name, setting in INTERVENTIONS.items()
-                      if getattr(context.stable, setting) != getattr(context.candidate, setting))
-    evidence = CaseEvidence(available, report["baseline"]["outcome"], report["candidate"]["outcome"])
+    evidence = inspect_case(context.stable, context.candidate, report)
+    available = evidence.available_interventions
     if context.experiment_budget == 0:
         reason = "experiment_budget_exhausted"
     elif not available:
