@@ -7,8 +7,11 @@ globalThis.fetch = (input, options) => {
     '/repos/example/release': { id: 82, full_name: 'example/release', default_branch: 'main', private: false },
     '/repositories/82/commits/main': { sha: 'a'.repeat(40) },
     '/repositories/82/releases': [{ tag_name: 'v1.0', draft: false, published_at: '2026-01-01T00:00:00Z' }],
+    '/repos/example/partial': {id:83,full_name:'example/partial',default_branch:'main',private:false},
+    '/repositories/83/actions/runs': {workflow_runs:[]},
   };
   if (url.pathname === '/repos/example/limited') return Promise.resolve(new Response(null, {status:429}));
+  if (url.pathname.startsWith('/repositories/83/') && !responses[url.pathname]) return Promise.resolve(new Response(null,{status:503}));
   const value = responses[url.pathname];
   return Promise.resolve(value ? Response.json(value) : new Response(null, {status:404}));
 };

@@ -61,8 +61,8 @@ export async function Tracker({ query }: { query: Record<string,string | string[
         <h2><a href={base!}>{selected.full_name}</a></h2></div>
         <a className="quiet" href={query.selected ? '/?selected='+selected.id : '/?repo='+encodeURIComponent(selected.full_name)}>Refresh measurements</a></div>
       <div className="tracker-metrics">
-        <article className="panel"><h3>Latest published release</h3><p className="metric">{metrics.releases[0]?.tag_name || 'None'}</p>
-          <p>{metrics.releases[0]?.published_at?.slice(0,10) || 'No published releases in the sample'}</p></article>
+        <article className="panel"><h3>Latest published release</h3><p className="metric">{metrics.releases?.[0]?.tag_name || (metrics.releases ? 'None' : '—')}</p>
+          <p>{metrics.releases?.[0]?.published_at?.slice(0,10) || (metrics.releases ? 'No published releases in the sample' : 'Release data unavailable')}</p></article>
         <article className="panel"><h3>Workflow success</h3><p className="metric">{metrics.completed ? Math.round(100*metrics.successes/metrics.completed)+'%' : '—'}</p>
           <p>{metrics.runs ? `${metrics.successes} of ${metrics.completed} completed runs in the latest ${metrics.runs.length}` : 'Workflow data unavailable'}</p></article>
         <article className="panel"><h3>Workflow elapsed p95</h3><p className="metric">{metrics.p95 === null ? '—' : Math.round(metrics.p95)+' s'}</p>
@@ -70,13 +70,13 @@ export async function Tracker({ query }: { query: Record<string,string | string[
       <section className="panel tracker-section"><h2>ReleaseTrace gate</h2>
         {metrics.commit && <p>Default branch head <a href={base+'/commit/'+metrics.commit.sha}><code>{metrics.commit.sha.slice(0,12)}</code></a></p>}
         {metrics.checks?.length ? metrics.checks.map(c => <p key={c.id}><a href={base+'/runs/'+c.id}>{c.name}</a> · {c.conclusion || c.status} · published by {c.app?.slug}</p>)
-          : <p>{!metrics.commit ? 'No default-branch commit to evaluate.' : metrics.checks ? 'No ReleaseTrace evaluation has been published on this commit.' : 'Check data unavailable for this commit.'}</p>}</section>
+          : <p>{metrics.commit === undefined ? 'Default-branch commit unavailable.' : !metrics.commit ? 'No default-branch commit to evaluate.' : metrics.checks ? 'No ReleaseTrace evaluation has been published on this commit.' : 'Check data unavailable for this commit.'}</p>}</section>
       <section className="panel tracker-section"><h2>Recent workflow runs</h2>
         {metrics.runs?.length ? <ul className="run-list">{metrics.runs.map(r=><li key={r.id}><a className="run-row" href={base+'/actions/runs/'+r.id}>
           <strong>{r.name}</strong><span>{r.conclusion || r.status}</span><code>{r.head_sha.slice(0,7)}</code></a></li>)}</ul>
           : <p>{metrics.runs ? 'No workflow runs on this branch.' : 'Workflow data unavailable.'}</p>}</section>
-      <section className="panel tracker-section"><h2>Published releases</h2>{metrics.releases.length ? <ul>{metrics.releases.map(r=>
-        <li key={r.tag_name}><a href={base+'/releases/tag/'+encodeURIComponent(r.tag_name)}>{r.tag_name}</a> · {r.published_at?.slice(0,10)} {r.prerelease && '· prerelease'}</li>)}</ul> : <p>No published releases.</p>}</section>
+      <section className="panel tracker-section"><h2>Published releases</h2>{metrics.releases?.length ? <ul>{metrics.releases.map(r=>
+        <li key={r.tag_name}><a href={base+'/releases/tag/'+encodeURIComponent(r.tag_name)}>{r.tag_name}</a> · {r.published_at?.slice(0,10)} {r.prerelease && '· prerelease'}</li>)}</ul> : <p>{metrics.releases ? 'No published releases.' : 'Release data unavailable.'}</p>}</section>
     </>}
     <p className="page-links"><a href="https://releasetrace-checkout-demo.excellentplover16.chatgpt.site/">Explore the synthetic checkout walkthrough</a></p>
   </>;

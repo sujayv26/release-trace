@@ -1,5 +1,13 @@
 import { test, expect } from '@playwright/test';
 
+test('keeps workflow evidence visible during a partial GitHub outage', async ({page}) => {
+  await page.goto('/?repo=example/partial');
+  await expect(page.getByText('No workflow runs on this branch.')).toBeVisible();
+  await expect(page.getByText('Default-branch commit unavailable.')).toBeVisible();
+  await expect(page.getByText('Release data unavailable.', {exact:true})).toBeVisible();
+  await expect(page.getByText('No published releases.', {exact:true})).toHaveCount(0);
+});
+
 test('opens the public tracker when a bookmark contains an unknown notice', async ({page}) => {
   const response = await page.goto('/?notice=constructor');
   expect(response?.status()).toBe(200);

@@ -44,15 +44,22 @@ type Check = { id: number; name: string; head_sha: string; status: string; concl
 export async function measure(repo: Repo, token?: string) {
   const path = '/repositories/' + repo.id;
   const branch = encodeURIComponent(repo.default_branch);
-  const [commit, releases, workflows] = await Promise.all([
+  const sections = await Promise.allSettled([
     github<{ sha: string }>(path + '/commits/' + branch, token).catch(e => {
       if (e instanceof GitHubError && [404, 409].includes(e.status)) return null;
       throw e;
     }),
     github<Release[]>(path + '/releases?per_page=20', token),
-    github<{workflow_runs: Workflow[]}>(path + '/actions/runs?branch=' + branch + '&per_page=25', token)
-      .catch(e => { if (e instanceof GitHubError && [403, 404].includes(e.status)) return null; throw e; }),
+    github<{workflow_runs: Workflow[]}>(path + '/actions/runs?branch=' + branch + '&per_page=25', token),
   ]);
+  for (const section of sections) {
+    if (section.status === 'rejected' && section.reason instanceof GitHubError && section.reason.status === 401) throw section.reason;
+  }
+  const [head, tags, history] = sections;
+  if (head.status === 'rejected' && tags.status === 'rejected' && history.status === 'rejected') throw head.reason;
+  const commit = head.status === 'fulfilled' ? head.value : undefined;
+  const releases = tags.status === 'fulfilled' ? tags.value : undefined;
+  const workflows = history.status === 'fulfilled' ? history.value : undefined;
   const runs = workflows?.workflow_runs;
   const completed = runs?.filter(r => r.status === 'completed') ?? [];
   const elapsed = completed.flatMap(r => r.run_started_at
@@ -60,8 +67,8 @@ export async function measure(repo: Repo, token?: string) {
   const checks = commit ? await github<{check_runs: Check[]}>(
     path + '/commits/' + commit.sha + '/check-runs?check_name=' +
     encodeURIComponent('ReleaseTrace / Build evaluation') + '&per_page=100', token)
-    .catch(e => { if (e instanceof GitHubError && [403, 404].includes(e.status)) return null; throw e; }) : null;
-  return { commit, releases: releases.filter(r => !r.draft && r.published_at), runs,
+    .catch(e => { if (e instanceof GitHubError && e.status === 401) throw e; return null; }) : null;
+  return { commit, releases: releases?.filter(r => !r.draft && r.published_at), runs,
     completed: completed.length, successes: completed.filter(r => r.conclusion === 'success').length,
     p95: elapsed.length ? elapsed[Math.ceil(elapsed.length * .95)-1] : null, timed: elapsed.length,
     checks: checks?.check_runs.filter(c => c.head_sha === commit?.sha && c.name === 'ReleaseTrace / Build evaluation'),
