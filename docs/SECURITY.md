@@ -17,8 +17,10 @@ keys and synthetic records.
 | Worker to evaluated application | The worker uses project-scoped bearer tokens and checks the approved HTTPS destinations before sending them in hosted mode. |
 | Approval to rollout | The API checks the approver role and candidate digest. The staging operator verifies the approved image and trusted build provenance before applying a rollout under the configured policy. |
 
-Protected API responses use no-store, and the dashboard sets cache controls
-for its release review pages. Managed mode disables the interactive API docs
+Protected API responses and dashboard review pages use `no-store`. Next.js
+checks the request origin against the dashboard host when handling server
+actions. Keep the forwarded host aligned with the public dashboard hostname.
+Managed mode disables the interactive API docs
 and the OpenAPI endpoint. Dashboard headers restrict framing and embedding
 and keep referrers out of downstream requests.
 
@@ -38,11 +40,14 @@ and keep referrers out of downstream requests.
 - Use the supported [pilot drills](PILOT.md) to verify recovery, restore, and
   the live GitHub App. Treat backups as sensitive. When recovering a live
   service from a backup, invalidate restored browser sessions before opening
-  ingress so logout and expiry state cannot be rolled back.
+  ingress so logout and expiry state cannot be rolled back. Use the
+  [restore procedure](PILOT.md#rehearse-recovery-and-restore).
 
-The local tests cover session issuance, expiry, logout, key rotation and
-disable, project revocation, and response cache controls. OIDC, MFA, managed
-secret rotation, and public-ingress abuse controls depend on the deployment
-and its identity provider. A successful local test or CI run establishes the
-application behavior exercised by that test. Report private issues to the
-repository maintainer without including active credentials or customer evidence.
+The [local browser rehearsal](PILOT.md#rehearse-locally-from-a-clean-checkout)
+uses production Next.js in an isolated stack. It tests two individual users,
+cookie settings, expiry and logout, rejected cross-origin sign-in, and fresh
+authorization after operator changes. Keep browser traces, storage dumps,
+request bodies, and credential-bearing headers out of logs and artifacts.
+Hosted policy and reverse-proxy behavior need their own verification. OIDC and
+MFA remain future work. Report private issues to the repository maintainer
+without including active credentials or customer evidence.

@@ -118,6 +118,8 @@ I built ReleaseTrace end to end, including the evaluation rules, reviewer experi
 
 - [Operations](docs/OPERATIONS.md) for service configuration, GitHub Checks, testing, and staged rollouts.
 - [Pilot runbook](docs/PILOT.md) for project onboarding, hosting preparation, benchmark results, and restore drills.
+- [Security and access](docs/SECURITY.md) for individual reviewer keys, browser sessions, and project isolation.
+- [Repository map](docs/ARCHITECTURE.md#repository-map) for the sign-in, project access, and approval code.
 - [API](docs/API.md) and [database](docs/DATABASE.md) for access rules and stored evidence.
 - [Investigator guide](docs/ReleaseTrace-Agent-Build-Guide.md) for controlled experiments and benchmark results.
 - [Product requirements](docs/PRD.md), [implementation plan](docs/IMPLEMENTATION_PLAN.md), and [contributor instructions](AGENTS.md).
