@@ -1,12 +1,20 @@
 import Link from 'next/link';
 import { signIn } from './actions';
-import { RunTime, Status } from './components';
+import { Status } from './components';
+import { RunHistory } from './run-history';
 import { type Account, historyPath, type Page, readApi, ReleaseApiError, type Run, viewerToken } from '../lib/releases';
 
 function AccessForm({ error }: { error?: string }) {
   return (
+    <div className="access-layout">
+    <section className="hero sign-in-hero">
+      <p className="eyebrow">Release review</p>
+      <h1>Know what changed before you ship.</h1>
+      <p>ReleaseTrace asks the current and proposed versions of an AI app the same questions. Review the differences and see what could block a release.</p>
+      <div className="intro-steps"><span>Compare versions</span><span>Review evidence</span><span>Decide what ships</span></div>
+    </section>
     <section className="panel access-panel">
-      <h1>Open release history</h1>
+      <h2>Open release history</h2>
       <p>Enter your individual access key or a local demo token.</p>
       {error === 'invalid' && <p role="alert">The access key was rejected.</p>}
       {error === 'unavailable' && <p role="alert">The ReleaseTrace API is unavailable. Try again shortly.</p>}
@@ -16,6 +24,7 @@ function AccessForm({ error }: { error?: string }) {
         <button className="primary">Open dashboard</button>
       </form>
     </section>
+    </div>
   );
 }
 
@@ -49,8 +58,21 @@ export default async function History({ searchParams }: {
 
   return (
     <>
-      <h1>Release history</h1>
-      {account.handle && <p className="intro">Signed in as <strong>{account.handle}</strong> · {selected.organization} / {selected.name} · {selected.role}</p>}
+      <section className="hero overview-hero">
+        <div>
+          <p className="eyebrow">Release history</p>
+          <h1>{selected.name}</h1>
+          <p>See whether the proposed version is ready and review the evidence behind each decision.</p>
+          {account.handle && <p className="identity">{account.handle} · {selected.role}</p>}
+        </div>
+        {!after && page.items[0] && (
+          <Link className="hero-run" href={`/runs/${encodeURIComponent(page.items[0].id)}`}>
+            <span>Latest evaluation</span>
+            <Status value={page.items[0].verdict} />
+            <strong>Review latest run <span aria-hidden="true">→</span></strong>
+          </Link>
+        )}
+      </section>
       {account.projects.length > 1 && (
         <nav className="filters project-links" aria-label="Projects">
           {account.projects.map(item => (
@@ -61,21 +83,17 @@ export default async function History({ searchParams }: {
           ))}
         </nav>
       )}
-      {page.items.length === 0 ? <p className="panel">No evaluations on this page.</p> : (
-        <div className="panel table-scroll" tabIndex={0} role="region" aria-label="Release evaluations">
-          <table>
-            <thead><tr><th scope="col">Commit</th><th scope="col">Queued at</th><th scope="col">Evaluation</th><th scope="col">Gate</th></tr></thead>
-            <tbody>{page.items.map((run) => (
-              <tr key={run.id}>
-                <td><Link href={`/runs/${encodeURIComponent(run.id)}`} aria-label={`Review commit ${run.commit_sha}, delivery ${run.id}`}><code>{run.commit_sha.slice(0, 12)}</code></Link></td>
-                <td><RunTime value={run.created_at} /></td>
-                <td>{run.evaluation_mode === 'build_endpoints' ? 'Build endpoints' : 'Synthetic fixtures'}</td>
-                <td><Status value={run.verdict} /></td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
-      )}
+      <div className="workspace-grid">
+        <RunHistory runs={page.items} />
+        <details className="panel review-guide" open>
+          <summary>How to review a release</summary>
+          <ol>
+            <li><strong>Read the decision</strong><p>Blocked means a release rule failed. Passed means the proposed version met the evaluation rules.</p></li>
+            <li><strong>Compare the answers</strong><p>Stable is the reference version. Candidate is the version being proposed. A citation is the source used to answer a test question.</p></li>
+            <li><strong>Take the next step</strong><p>Review failed cases on a blocked run. On a passing run, users with approval access can record a decision.</p></li>
+          </ol>
+        </details>
+      </div>
       <nav aria-label="Run pages" className="page-links">
         {after && <Link href={{ pathname: '/', query: projectQuery }}>First page</Link>}
         {page.next_cursor && <Link href={{ pathname: '/', query: { ...projectQuery, after: page.next_cursor } }}>Next page</Link>}
