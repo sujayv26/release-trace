@@ -17,6 +17,19 @@ Install Playwright and select an installed Chromium browser using `RELEASETRACE_
 
 ## Deploy the live tracker
 
+Before deploying the authenticator upgrade, set a stable base64-encoded 32-byte
+`RT_TRACKER_ENCRYPTION_KEY` in the production secret store. Keep a protected
+backup. Changing it without migrating stored seeds prevents sign-in. Restrict
+access to older deployment URLs and do not roll back to key-only authentication
+against the production account store.
+
+Personal workspace owners sign in with their workspace key and a six-digit
+authenticator code. An existing owner enters their key with the code field
+empty to begin enrollment. Confirm setup within ten minutes. Keep an offline
+backup of the authenticator setup key separate from the workspace key for
+device recovery. Existing key-only sessions must sign in again. GitHub App
+identities and operator-provisioned reviewer accounts use separate sign-in flows.
+
 Deploy `dashboard/` as a Next.js project on Vercel. Its `vercel.json` selects live tracking. The regular Compose dashboard continues to use the existing reviewer API. Attach a **private** Vercel Blob store in Production. Personal workspace keys and one-hour session tokens are random 256-bit credentials. The private store addresses both by hash. Logout deletes the server-side session, and the account retains its repository IDs. Concurrent list changes use ETags. No GitHub credential is used for public-only workspace lookups.
 
 For optional GitHub sign-in, configure a GitHub App with a callback of `https://YOUR-HOST/auth/callback`, read permissions for Actions, Contents and Checks, and installation on selected repositories. Set `RT_GITHUB_CLIENT_ID`, `RT_GITHUB_CLIENT_SECRET`, `RT_GITHUB_APP_SLUG`, `RT_TRACKER_ORIGIN` and a base64-encoded random 32-byte `RT_TRACKER_ENCRYPTION_KEY` in Vercel. The OAuth exchange uses state and PKCE. The server encrypts the GitHub user token before storing it with the short-lived session. Each private read uses the signed-in user's GitHub token. Workspace-key and GitHub identities have independent saved lists.

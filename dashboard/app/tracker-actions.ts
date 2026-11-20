@@ -2,15 +2,26 @@
 
 import { redirect } from 'next/navigation';
 import { github, repositoryName, type Repo } from '../lib/github-tracker';
-import { changeRepository, createWorkspaceKey, logoutTracker, signInKey, trackerSession } from '../lib/tracker-session';
+import { beginEnrollment, changeRepository, createWorkspaceKey, logoutTracker, signInKey, trackerSession } from '../lib/tracker-session';
 
-export async function newWorkspace() {
-  try { return {key:await createWorkspaceKey(),error:''}; }
-  catch { return {key:'',error:'Workspace creation is temporarily unavailable. Try later or sign in with your existing key.'}; }
-}
-export async function loginWorkspace(form:FormData) {
-  const ok=await signInKey(String(form.get('key') || ''));
-  redirect(ok ? '/' : '/?notice=key');
+type LoginForm = {key:string; secret:string; ticket:string; error:string; created:boolean};
+export async function loginWorkspace(_previous:LoginForm, form:FormData): Promise<LoginForm> {
+  const empty = {key:'',secret:'',ticket:'',created:false};
+  const created = form.get('intent')==='create';
+  try {
+    const key = created ? await createWorkspaceKey() : String(form.get('key') || '');
+    const code = String(form.get('code') || '').trim();
+    if (!code) {
+      const setup = await beginEnrollment(key);
+      if (setup) return {key, ...setup, created, error:''};
+    }
+    if (!code || !await signInKey(key,code,String(form.get('ticket') || ''))) {
+      return {...empty,error:'Sign-in failed. Check your workspace key and enter a fresh code. During setup, leave the code blank to restart. After five failed codes, wait five minutes.'};
+    }
+  } catch {
+    return {...empty,error:'Workspace access is temporarily unavailable. Please try again later.'};
+  }
+  redirect('/');
 }
 
 export async function openRepository(form: FormData) {

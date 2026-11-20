@@ -3,6 +3,7 @@ import { BlobPreconditionFailedError, del, get, put } from '@vercel/blob';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { cookies, headers } from 'next/headers';
 import { github } from './github-tracker';
+import { Secret, TOTP } from 'otpauth';
 
 export const siteOrigin = () => new URL(process.env.RT_TRACKER_ORIGIN || 'https://releasetrace-demo.vercel.app').origin;
 export const secure = () => siteOrigin().startsWith('https://');
@@ -12,8 +13,14 @@ export const oauthEnabled = () => Boolean(storageEnabled() && process.env.RT_GIT
   process.env.RT_GITHUB_CLIENT_SECRET && process.env.RT_TRACKER_ENCRYPTION_KEY);
 const options = {access:'private' as const, addRandomSuffix:false, contentType:'application/json'};
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
-type Workspace = {repositories: number[]};
-type Session = {userId:string; login:string; encryptedToken?:string; expires:number};
+type Workspace = {
+  repositories: number[];
+  authenticator?: string;
+  lastStep?: number;
+  failures?: number;
+  retryAfter?: number;
+};
+type Session = {userId:string; login:string; encryptedToken?:string; expires:number; verifiedAuthenticator?:boolean};
 const workspacePath = (id:string) => 'tracker/accounts/'+id+'.json';
 const sessionPath = (token:string) => 'tracker/sessions/'+hash(token)+'.json';
 
@@ -36,9 +43,9 @@ function decrypt(value:string) {
   cipher.setAuthTag(data.subarray(-16));
   return Buffer.concat([cipher.update(data.subarray(12,-16)),cipher.final()]).toString();
 }
-async function startSession(userId:string, login:string, token?:string) {
+async function startSession(userId:string, login:string, token?:string, verifiedAuthenticator=false) {
   const raw = randomBytes(32).toString('base64url');
-  const session:Session = {userId,login,expires:Date.now()+3600_000,encryptedToken:token && encrypt(token)};
+  const session:Session = {userId,login,verifiedAuthenticator,expires:Date.now()+3600_000,encryptedToken:token && encrypt(token)};
   await put(sessionPath(raw),JSON.stringify(session),{...options,ttlDays:1});
   (await cookies()).set(cookieName(),raw,{secure:secure(),httpOnly:true,sameSite:'strict',path:'/',maxAge:3600});
 }
@@ -65,18 +72,65 @@ export async function createWorkspaceKey() {
   await put(workspacePath('key-'+hash(key)),JSON.stringify({repositories:[]}),options);
   return key;
 }
-export async function signInKey(key:string) {
-  if (!/^rtw_[\w-]{43}$/.test(key)) return false;
-  const id='key-'+hash(key);
-  if (!await read<Workspace>(workspacePath(id))) return false;
-  await startSession(id,'Personal workspace');
-  return true;
+const workspaceId = (key:string) => /^rtw_[\w-]{43}$/.test(key) ? 'key-'+hash(key) : null;
+
+export async function beginEnrollment(key:string) {
+  const id = workspaceId(key);
+  if (!id) return null;
+  const record = await read<Workspace>(workspacePath(id));
+  if (!record || record.data.authenticator) return null;
+  const secret = new Secret({size:20}).base32;
+  // Bind a short-lived setup form to its workspace. Only a confirmed code installs the seed.
+  const ticket = encrypt(JSON.stringify({purpose:'enroll', id, secret, expires:Date.now()+600_000}));
+  return {secret,ticket};
+}
+
+function enrollmentSeed(ticket:string, id:string): string | null {
+  if (!ticket || ticket.length > 1024) return null;
+  try {
+    const setup = JSON.parse(decrypt(ticket));
+    return setup.purpose==='enroll' && setup.id===id && setup.expires>Date.now() ? setup.secret : null;
+  } catch { return null; }
+}
+
+export async function signInKey(key:string, code:string, ticket:string) {
+  const id = workspaceId(key);
+  if (!id || !/^\d{6}$/.test(code)) return false;
+  const path = workspacePath(id);
+  for (let attempt=0; attempt<4; attempt++) {
+    const record = await read<Workspace>(path);
+    const now = Date.now();
+    if (!record || (record.data.retryAfter || 0)>now) return false;
+    const account = record.data;
+    if (account.authenticator && ticket) return false;
+    const seed = account.authenticator ? decrypt(account.authenticator) : enrollmentSeed(ticket,id);
+    if (!seed) return false;
+    const delta = new TOTP({secret:seed}).validate({token:code, timestamp:now, window:1});
+    const step = Math.floor(now/30_000) + (delta ?? 0);
+    const valid = delta!==null && step>(account.lastStep ?? -1);
+    const failures = (account.retryAfter ? 0 : account.failures || 0)+1;
+    const next = valid
+      ? {...account,authenticator:account.authenticator || encrypt(seed),lastStep:step,failures:0,retryAfter:0}
+      : {...account,failures,retryAfter:failures>=5 ? now+300_000 : 0};
+    try {
+      // Consume the time step atomically before issuing a cookie, including during first enrollment.
+      await put(path,JSON.stringify(next),{...options,ifMatch:record.etag});
+    } catch(e) {
+      if (e instanceof BlobPreconditionFailedError) continue;
+      throw e;
+    }
+    if (valid) await startSession(id,'Personal workspace',undefined,true);
+    return valid;
+  }
+  return false;
 }
 export async function trackerSession() {
   const raw=(await cookies()).get(cookieName())?.value;
   if (!raw || !/^[\w-]{43}$/.test(raw) || !storageEnabled()) return null;
   const entry=await read<Session>(sessionPath(raw));
   if (!entry || entry.data.expires<=Date.now()) return null;
+  // Pre-upgrade personal sessions must complete enrollment before accessing their saved list.
+  if (entry.data.userId.startsWith('key-') && !entry.data.verifiedAuthenticator) return null;
   const {userId,login,encryptedToken}=entry.data;
   return {userId,login,token:encryptedToken ? decrypt(encryptedToken) : undefined};
 }
@@ -93,7 +147,7 @@ export async function changeRepository(userId:string,repo:number,save:boolean) {
     if (save && ids.size>=12) return false;
     if (save) ids.add(repo); else ids.delete(repo);
     try {
-      await put(path,JSON.stringify({repositories:[...ids]}),{...options,ifMatch:record.etag});
+      await put(path,JSON.stringify({...record.data,repositories:[...ids]}),{...options,ifMatch:record.etag});
       return true;
     } catch(e) { if (!(e instanceof BlobPreconditionFailedError) || retry===3) throw e; }
   }

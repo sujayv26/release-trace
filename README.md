@@ -6,11 +6,11 @@
 
 ## Track your repository
 
-1. Select **Create free workspace**, save the personal key somewhere private, and select **Open my workspace**. Use **Sign in** with the same key on another browser or device.
+1. Select **Create free workspace** and save your workspace key. Add the setup key to your authenticator app, enter the six-digit code, and select **Verify and open workspace**. On another device, sign in with the workspace key and a fresh code.
 2. Enter a public GitHub repository URL or `owner/repository` and select **Track repository**. The workspace saves up to 12 repositories. Select one to review or refresh it.
 3. Inspect published release tags, workflow success and elapsed p95 for the latest 25 default-branch runs, and any ReleaseTrace Check on the current commit. Each workflow links to the original GitHub record. An empty gate means no matching evaluation was reported. Tracking a repository does not configure or execute an AI evaluation.
 
-The hosted tracker stores accounts in a private Vercel Blob store. Workspace keys grant access to personal tracking lists. GitHub App sign-in, when configured, uses GitHub's own repository permissions. The invite-only release review API still controls evaluation evidence and approvals. [Tracker configuration](docs/LIVE_PILOT.md#deploy-the-live-tracker)
+The tracker stores accounts in a private Vercel Blob store. Existing workspace owners enroll at their next sign-in. GitHub App sign-in, when configured, uses GitHub's repository permissions. The invite-only release review API controls evaluation evidence and approvals. [Tracker configuration](docs/LIVE_PILOT.md#deploy-the-live-tracker)
 
 ## Two-minute public walkthrough
 

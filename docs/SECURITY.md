@@ -49,5 +49,11 @@ cookie settings, expiry and logout, rejected cross-origin sign-in, and fresh
 authorization after operator changes. Keep browser traces, storage dumps,
 request bodies, and credential-bearing headers out of logs and artifacts.
 Hosted policy and reverse-proxy behavior need their own verification. OIDC and
-MFA remain future work. Report private issues to the repository maintainer
+MFA for the operator-managed reviewer API remain future work. Personal tracker
+workspaces require a workspace key and a time-based authenticator. Encrypted
+seeds, conditional storage writes, and a five-minute lock after five failed
+codes protect the sign-in flow. The server consumes a valid time step before
+issuing a browser session. [Enrollment and recovery](LIVE_PILOT.md#deploy-the-live-tracker)
+
+Report private issues to the repository maintainer
 without including active credentials or customer evidence.
