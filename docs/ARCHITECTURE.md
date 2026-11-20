@@ -2,6 +2,27 @@
 
 ReleaseTrace supports an operator-managed directory of GitHub repositories and installations. Reviewer accounts get roles per project, and release evidence is scoped to that repository and installation. The Compose demo uses shared role tokens for one project. Compose runs PostgreSQL, applies Alembic migrations, and starts FastAPI, the Python worker, and the Next.js dashboard. SQLite supports local service development.
 
+## Repository map
+
+| Path | Responsibility |
+| --- | --- |
+| `dashboard/app` | Pages, navigation, and server actions for release review |
+| `dashboard/lib/session.ts` | Sign-in, browser cookie, and logout |
+| `dashboard/lib/releases.ts` | Server-to-server release API client and response types |
+| `service/api.py` | Request validation, routing, and release workflow coordination |
+| `service/authentication.py`, `service/accounts.py`, `service/projects.py` | Session and key authentication, account management, project configuration and roles |
+| `service/store.py`, `service/migrations` | Database access, persistent state, and schema changes |
+| `service/worker.py`, `service/temporal_worker.py` | Background evaluation, investigation, and Check publication |
+| `service/evaluate_builds.py`, `service/evaluation_config.py` | Application evaluation and versioned project suites |
+| `service/investigation_graph.py`, `service/github_check.py` | Controlled diagnostic reruns and formatting GitHub Checks |
+| `runbook_rag` | Companion application tested by ReleaseTrace |
+| `demo`, `staging`, `.github/workflows` | Fixtures and rehearsals, rollout tooling, and CI |
+
+The dashboard owns browser cookies. The API owns session validation and
+project authorization. The worker owns outbound evaluation credentials, and
+the rollout operator owns Kubernetes access. See [security and access](SECURITY.md)
+for the credential lifecycle and deployment checks.
+
 ## System design
 
 ```mermaid

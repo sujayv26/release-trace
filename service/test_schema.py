@@ -38,7 +38,7 @@ class SchemaTest(unittest.TestCase):
             self.assertIsNone(old_run.github_check_id)
             self.assertIsNone(old_run.github_check_retry_at)
             version = connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one()
-            self.assertEqual(version, "0008_account_access_events")
+            self.assertEqual(version, "0009_browser_sessions")
             self.assertTrue(inspect(connection).has_table("investigations"))
             self.assertTrue(inspect(connection).has_table("approvals"))
             self.assertTrue(inspect(connection).has_table("deployments"))
@@ -46,6 +46,7 @@ class SchemaTest(unittest.TestCase):
             self.assertTrue(inspect(connection).has_table("project_owners"))
             self.assertTrue(inspect(connection).has_table("project_memberships"))
             self.assertTrue(inspect(connection).has_table("account_access_events"))
+            self.assertTrue(inspect(connection).has_table("browser_sessions"))
             indexes = {index["name"] for index in inspect(connection).get_indexes(deliveries.name)}
             self.assertEqual(indexes, {
                 "ix_webhook_deliveries_state", "ix_webhook_deliveries_project_history",

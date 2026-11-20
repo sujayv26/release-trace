@@ -6,7 +6,6 @@ import logging
 import os
 import re
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Literal
@@ -20,12 +19,13 @@ from sqlalchemy import func, select, tuple_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
-from .accounts import ACCESS_KEY, bind_project_owners, key_hash
+from .accounts import bind_project_owners
+from .authentication import SESSION_TTL_SECONDS, Authentication, Principal, bearer_token
 from .evaluate_builds import BuildIdentity, ImageDigest
 from .evaluation_config import EvaluationSnapshot
 from .investigator import enqueue_investigation, investigation_key
 from .projects import Role, load_projects
-from .store import accounts, approvals, as_utc, database, deliveries, deployments, enqueue, investigations, project_memberships
+from .store import accounts, approvals, as_utc, browser_sessions, database, deliveries, deployments, enqueue, investigations, project_memberships
 
 MAX_BODY = 1024 * 1024
 DELIVERY_ID = re.compile(r"[A-Za-z0-9-]{1,128}")
@@ -85,10 +85,9 @@ class AccountSummary(BaseModel):
     projects: list[ProjectSummary]
 
 
-@dataclass(frozen=True)
-class Principal:
-    handle: str | None
-    roles: dict[int, Role]
+class BrowserSession(BaseModel):
+    session_token: str
+    expires_in: int
 
 
 class PolicyEvidence(BaseModel):
@@ -208,13 +207,14 @@ def create_app():
     local_tokens = {}
     if not managed:
         local_tokens = {
-            role: value.encode() for role, value in (
+            role: value for role, value in (
                 ("viewer", os.environ["RELEASETRACE_READ_TOKEN"]),
                 ("maintainer", os.getenv("RELEASETRACE_MAINTAINER_TOKEN", "")),
                 ("approver", os.getenv("RELEASETRACE_APPROVER_TOKEN", "")),
             ) if value
         }
-        if "viewer" not in local_tokens or len(set(local_tokens.values())) != len(local_tokens):
+        if ("viewer" not in local_tokens or len(set(local_tokens.values())) != len(local_tokens)
+                or any(not token.isascii() for token in local_tokens.values())):
             raise ValueError("A viewer token and distinct role tokens are required")
         if "approver" in local_tokens and not 1 <= len(approver_actor) <= 128:
             raise ValueError("An approver requires an actor name")
@@ -242,32 +242,27 @@ def create_app():
         finally:
             engine.dispose()
 
-    app = FastAPI(lifespan=lifespan)
+    app = FastAPI(
+        lifespan=lifespan, docs_url=None if managed else "/docs",
+        redoc_url=None if managed else "/redoc", openapi_url=None if managed else "/openapi.json",
+    )
+    authentication = Authentication(engine, projects, managed, local_tokens)
+
+    @app.middleware("http")
+    async def protect_private_responses(request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/v1/"):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
     mode = func.coalesce(deliveries.c.inputs["evaluation_mode"].as_string(), "synthetic_fixture").label("evaluation_mode")
     project_columns = tuple_(deliveries.c.repository_id, deliveries.c.installation_id)
 
     def authenticate(request: Request):
-        provided = request.headers.get("authorization", "")
-        if managed:
-            key = provided.removeprefix("Bearer ")
-            if provided.startswith("Bearer ") and ACCESS_KEY.fullmatch(key):
-                with engine.connect() as connection:
-                    rows = connection.execute(select(
-                        accounts.c.handle, project_memberships.c.repository_id, project_memberships.c.installation_id,
-                        project_memberships.c.organization, project_memberships.c.role,
-                    ).outerjoin(project_memberships).where(accounts.c.key_hash == key_hash(key))).all()
-                if rows:
-                    roles = {}
-                    for row in rows:
-                        project = projects.get(row.repository_id)
-                        if project and (project.installation_id, project.organization) == (row.installation_id, row.organization):
-                            roles[row.repository_id] = row.role
-                    return Principal(rows[0].handle, roles)
-        else:
-            for role, value in local_tokens.items():
-                if hmac.compare_digest(provided.encode(), b"Bearer " + value):
-                    return Principal(None, {next(iter(projects)): role})
-        raise ReadError(401, "unauthorized", "A valid access key is required")
+        principal = authentication.authenticate(bearer_token(request.headers.get("authorization", "")))
+        if principal is None:
+            raise ReadError(401, "unauthorized", "A valid access key or session is required")
+        return principal
 
     def allowed_projects(principal):
         return project_columns.in_([(key, projects[key].installation_id) for key in principal.roles])
@@ -317,6 +312,7 @@ def create_app():
             connection.execute(select(deployments.c.run_id).limit(1))
             connection.execute(select(accounts.c.handle).limit(1))
             connection.execute(select(project_memberships.c.handle).limit(1))
+            connection.execute(select(browser_sessions.c.token_hash).limit(1))
         return {"status": "ready"}
 
     @app.post("/webhooks/github", response_model=Accepted, status_code=202)
@@ -365,9 +361,20 @@ def create_app():
             return error(409, "delivery_conflict", "Delivery ID already exists", request_id)
         return Accepted(status=status, delivery_id=delivery_id)
 
+    @app.post("/v1/sessions", status_code=201, response_model=BrowserSession)
+    def create_session(request: Request):
+        token = authentication.create_session(bearer_token(request.headers.get("authorization", "")))
+        if token is None:
+            raise ReadError(401, "unauthorized", "A valid access key is required")
+        return BrowserSession(session_token=token, expires_in=SESSION_TTL_SECONDS)
+
+    @app.delete("/v1/sessions/current", status_code=204)
+    def end_session(request: Request):
+        authentication.end_session(bearer_token(request.headers.get("authorization", "")))
+        return Response(status_code=204)
+
     @app.get("/v1/me")
-    def account(response: Response, principal: Principal = Depends(authenticate)) -> AccountSummary:
-        response.headers["Cache-Control"] = "no-store"
+    def account(principal: Principal = Depends(authenticate)) -> AccountSummary:
         return AccountSummary(handle=principal.handle, projects=[
             ProjectSummary(id=str(key), name=project.name, organization=project.organization, role=principal.roles[key])
             for key, project in projects.items() if key in principal.roles

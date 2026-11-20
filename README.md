@@ -114,6 +114,8 @@ I built ReleaseTrace end to end, including the evaluation rules, reviewer experi
 
 ## Documentation
 
+- [Security and access](docs/SECURITY.md) explains credentials and hosted verification. [Repository map](docs/ARCHITECTURE.md#repository-map) shows where each responsibility lives.
+
 - [Operations](docs/OPERATIONS.md) for service configuration, GitHub Checks, testing, and staged rollouts.
 - [Pilot runbook](docs/PILOT.md) for project onboarding, hosting preparation, benchmark results, and restore drills.
 - [API](docs/API.md) and [database](docs/DATABASE.md) for access rules and stored evidence.

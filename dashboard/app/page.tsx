@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { signIn } from './actions';
 import { Status } from './components';
 import { RunHistory } from './run-history';
-import { type Account, historyPath, type Page, readApi, ReleaseApiError, type Run, viewerToken } from '../lib/releases';
+import { type Account, historyPath, type Page, readApi, ReleaseApiError, type Run } from '../lib/releases';
+import { sessionToken } from '../lib/session';
 
 function AccessForm({ error }: { error?: string }) {
   return (
@@ -32,7 +33,7 @@ export default async function History({ searchParams }: {
   searchParams: Promise<{ after?: string; access?: string; project?: string | string[] }>;
 }) {
   const { after, access, project } = await searchParams;
-  const token = await viewerToken();
+  const token = await sessionToken();
   if (!token) return <AccessForm error={access} />;
 
   let page: Page<Run>;

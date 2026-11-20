@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { recordDecision, startInvestigation } from '../../actions';
 import { Evidence, RunTime, Status } from '../../components';
-import { type Case, type Page, readApi, ReleaseApiError, type RunDetail, viewerToken } from '../../../lib/releases';
+import { type Case, type Page, readApi, ReleaseApiError, type RunDetail } from '../../../lib/releases';
+import { sessionToken } from '../../../lib/session';
 
 export default async function RunPage({ params, searchParams }: {
   params: Promise<{ id: string }>;
@@ -11,7 +12,7 @@ export default async function RunPage({ params, searchParams }: {
   const { id } = await params;
   const { outcome, after, investigation, decision } = await searchParams;
   if (!/^[A-Za-z0-9-]{1,128}$/.test(id)) notFound();
-  const token = await viewerToken();
+  const token = await sessionToken();
   if (!token) redirect('/');
   const path = `/runs/${id}`;
   const query = new URLSearchParams();
