@@ -1,0 +1,31 @@
+{
+  "revision": "municipal-archive-v1",
+  "documents": {
+    "loan-v1": "Send originals on a 30-day loan without a condition report.",
+    "loan-v2": "Loan originals for 14 days only after a signed condition report.",
+    "reading-room-v1": "Originals must stay in the reading room while a researcher consults them.",
+    "scan-v1": "Deliver preservation masters as uncompressed TIFF with a checksum manifest.",
+    "scan-appendix-v1": "The preservation delivery checklist requires uncompressed TIFF and a checksum manifest.",
+    "rights-v1": "Obtain written permission from the donor before publishing restricted photographs."
+  },
+  "cases": [
+    {"id":"loan-stale","question":"What paperwork is due before an original leaves on loan?","expected":"loan-v2","citation":"loan-v1","answer":"No condition report is needed."},
+    {"id":"loan-lookalike","question":"May a partner museum borrow an original for two weeks?","expected":"loan-v2","citation":"reading-room-v1","answer":"Originals must always stay in the reading room."},
+    {"id":"rights-missing","question":"What is required to publish a restricted photograph?","expected":"rights-v1","citation":null,"answer":"Publish it once the accession number is recorded."},
+    {"id":"loan-wrong-duration","question":"How long can the museum keep the original?","expected":"loan-v2","citation":"loan-v2","answer":"Thirty days after signing the condition report."},
+    {"id":"rights-wrong-actor","question":"Who must authorize publication of restricted photographs?","expected":"rights-v1","citation":"rights-v1","answer":"Written permission from any volunteer is enough."},
+    {"id":"scan-checklist","question":"What belongs in the preservation delivery package?","expected":"scan-v1","citation":"scan-appendix-v1","answer":"Uncompressed TIFF and a checksum manifest."},
+    {"id":"scan-valid","question":"Can I send a JPEG as the preservation master?","expected":"scan-v1","citation":"scan-v1","answer":"Use an uncompressed TIFF and include the checksum manifest."},
+    {"id":"loan-valid","question":"Can we ship this original before anyone signs its condition report?","expected":"loan-v2","citation":"loan-v2","answer":"Wait for a signed condition report. The loan term is 14 days."}
+  ],
+  "labels": {
+    "loan-stale":["stale citation","regression"],
+    "loan-lookalike":["lookalike document","regression"],
+    "rights-missing":["missing evidence","regression"],
+    "loan-wrong-duration":["wrong answer with correct citation","regression"],
+    "rights-wrong-actor":["wrong answer with correct citation","regression"],
+    "scan-checklist":["equivalent authorized source","valid"],
+    "scan-valid":["valid answer","valid"],
+    "loan-valid":["valid answer","valid"]
+  }
+}
