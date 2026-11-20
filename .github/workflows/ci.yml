@@ -145,7 +145,7 @@ jobs:
         run: docker compose -f compose.yaml -f compose.approval.yaml down --volumes
   pilot:
     name: Local pilot operator rehearsal
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -153,8 +153,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r service/requirements.txt playwright==1.61.0
-      - run: python -m playwright install --with-deps chromium
       - name: Follow the pilot runbook and exercise production dashboard sessions
+        env:
+          RELEASETRACE_TEST_BROWSER_CHANNEL: chrome
         run: python -m demo.pilot_rehearsal --browser --evidence "$RUNNER_TEMP/pilot-evidence.json"
       - uses: actions/upload-artifact@v4
         with:

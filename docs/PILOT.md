@@ -22,7 +22,8 @@ database dump stay out of the printed evidence. Keep the generated JSON as the
 record of the rehearsal.
 
 To include Chromium sign-in and authorization checks, install the test-only
-browser dependency and use the same command as CI:
+browser dependency and use the same rehearsal as CI. CI uses Chrome from its
+runner image, and local runs use Playwright's bundled Chromium:
 
 ```bash
 python -m pip install playwright==1.61.0

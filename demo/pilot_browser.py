@@ -1,5 +1,6 @@
 """Exercise production dashboard sessions in disposable Chromium contexts."""
 
+import os
 import re
 from time import time
 
@@ -73,7 +74,8 @@ def exercise_browser(compose, dashboard_url, api, alpha_key, beta_key, beta_repo
     other_origin = str(api.base_url).rstrip("/")
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            # CI uses Chrome from the runner image. Local runs use bundled Chromium.
+            browser = playwright.chromium.launch(channel=os.getenv("RELEASETRACE_TEST_BROWSER_CHANNEL"))
             alpha, beta, foreign = [browser.new_context(base_url=dashboard_url).new_page() for _ in range(3)]
             observed_urls = []
             for page in (alpha, beta, foreign):
