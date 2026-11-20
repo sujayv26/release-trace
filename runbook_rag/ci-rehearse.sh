@@ -30,8 +30,11 @@ for role in stable stale-candidate corrected-candidate; do
   docker run -d --name "runbook-$role" -p "127.0.0.1:$port:8000" \
     -e RUNBOOK_ACCESS_TOKEN -e "RUNBOOK_BUILD_COMMIT=$commit" \
     -e "RUNBOOK_IMAGE_DIGEST=$digest" "$reference"
-  curl --fail --silent --show-error --retry 15 --retry-connrefused --retry-delay 1 \
-    "http://127.0.0.1:$port/health"
+  if ! curl --fail --silent --show-error --max-time 3 --retry 15 --retry-all-errors --retry-delay 1 \
+    "http://127.0.0.1:$port/health"; then
+    docker logs "runbook-$role"
+    exit 1
+  fi
   jq --arg role "$role" --arg sha "$commit" --arg digest "$digest" --arg port "$port" \
     '.[$role] = {url:("http://127.0.0.1:" + $port + "/evaluate"),
       build:{commit_sha:$sha,image_digest:$digest}}' "$targets" > "$targets.tmp"
