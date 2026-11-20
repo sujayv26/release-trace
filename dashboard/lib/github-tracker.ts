@@ -6,7 +6,16 @@ export function repositoryName(input: string) {
 }
 
 export class GitHubError extends Error {
-  constructor(readonly status: number) { super('GitHub request unsuccessful'); }
+  constructor(readonly status: number, readonly rateLimited = false) { super('GitHub request unsuccessful'); }
+}
+
+export function githubNotice(error: unknown) {
+  if (error instanceof GitHubError) {
+    if (error.rateLimited) return 'rate';
+    if (error.status === 401) return 'expired';
+    if (error.status === 404 || error.status === 403) return 'repository';
+  }
+  return 'unavailable';
 }
 
 export async function github<T>(path: string, token?: string): Promise<T> {
@@ -17,7 +26,11 @@ export async function github<T>(path: string, token?: string): Promise<T> {
     ...(token ? { cache: 'no-store' as const } : { next: { revalidate: 60 } }),
     redirect: 'error', signal: AbortSignal.timeout(8000),
   });
-  if (!res.ok) throw new GitHubError(res.status);
+  if (!res.ok) {
+    const rateLimited = res.status === 429 || (res.status === 403 &&
+      (res.headers.get('x-ratelimit-remaining') === '0' || res.headers.has('retry-after')));
+    throw new GitHubError(res.status,rateLimited);
+  }
   return res.json();
 }
 

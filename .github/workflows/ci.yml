@@ -121,6 +121,9 @@ jobs:
       - run: npm ci
       - run: node --test tests/tracker-auth.test.mjs
       - run: npm run build
+      - run: npx playwright test
+        env:
+          RELEASETRACE_TEST_BROWSER_CHANNEL: chrome
   compose:
     name: Compose smoke test
     runs-on: ubuntu-latest

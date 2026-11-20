@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { github, repositoryName, type Repo } from '../lib/github-tracker';
+import { github, githubNotice, repositoryName, type Repo } from '../lib/github-tracker';
 import { beginEnrollment, changeRepository, createWorkspaceKey, logoutTracker, signInKey, trackerSession } from '../lib/tracker-session';
 
 type LoginForm = {key:string; secret:string; ticket:string; error:string; created:boolean};
@@ -30,7 +30,7 @@ export async function openRepository(form: FormData) {
   const session = await trackerSession();
   let repository: Repo;
   try { repository = await github<Repo>('/repos/'+name, session?.token); }
-  catch { redirect('/?notice=repository'); }
+  catch (error) { redirect('/?notice='+githubNotice(error)); }
   if (!session) redirect('/?repo='+encodeURIComponent(repository.full_name));
   const saved = await changeRepository(session.userId,repository.id,true);
   redirect(saved ? '/?selected='+repository.id : '/?notice=limit');

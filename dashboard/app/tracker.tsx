@@ -1,4 +1,4 @@
-import { github, GitHubError, measure, repositoryName, type Repo } from '../lib/github-tracker';
+import { github, githubNotice, measure, repositoryName, type Repo } from '../lib/github-tracker';
 import { savedRepositories, oauthEnabled, storageEnabled, trackerSession } from '../lib/tracker-session';
 import { WorkspaceLogin } from './workspace-login';
 import { openRepository, removeRepository, signOutTracker } from './tracker-actions';
@@ -6,7 +6,10 @@ import { openRepository, removeRepository, signOutTracker } from './tracker-acti
 const notices: Record<string,string> = {
   key:'That workspace key was not recognized.',
   name:'Enter a GitHub repository URL or owner/repository.',
-  repository:'GitHub could not open this repository. Check its name, your access, or try again after the GitHub rate limit resets.',
+  repository:'Repository unavailable. Check its name and whether you have access on GitHub.',
+  rate:'GitHub’s request limit was reached. Try again after the limit resets.',
+  expired:'GitHub access expired. Sign out and sign in again.',
+  unavailable:'GitHub measurements are temporarily unavailable. Try again later.',
   login:'GitHub sign-in did not complete. Please try again.',
   setup:'Account sign-in is awaiting host configuration. You can inspect public repositories now.',
   limit:'Your workspace has 12 repositories. Remove one before adding another.',
@@ -22,14 +25,14 @@ export async function Tracker({ query }: { query: Record<string,string | string[
   }));
   const name = typeof query.repo === 'string' && repositoryName(query.repo);
   let selected = projects.find(p => String(p.id) === query.selected && p.default_branch);
-  let error = notices[String(query.notice)] || '';
+  let error = typeof query.notice === 'string' && Object.hasOwn(notices, query.notice) ? notices[query.notice] : '';
+  if (query.repo !== undefined && !name) error = notices.name;
   let metrics: Awaited<ReturnType<typeof measure>> | undefined;
   try {
     if (name && !selected) selected = await github<Repo>('/repos/'+name);
     if (selected) metrics = await measure(selected, name && !query.selected ? undefined : session?.token);
   } catch (e) {
-    error = e instanceof GitHubError && e.status === 401 ? 'GitHub access expired. Sign out and sign in again.'
-      : 'GitHub metrics are unavailable right now. Check access and try again after the GitHub rate limit resets.';
+    error = notices[githubNotice(e)];
   }
   const base = selected && 'https://github.com/'+selected.full_name;
   const install = process.env.RT_GITHUB_APP_SLUG;
@@ -39,7 +42,7 @@ export async function Tracker({ query }: { query: Record<string,string | string[
       <p>Inspect published releases, recent workflow runs, and release checks on the latest default-branch commit.</p></div>
       <div>{session ? <><p>Signed in as <strong>{session.login}</strong></p><form action={signOutTracker}><button className="quiet">Sign out</button></form></>
         : oauthEnabled() ? <a className="hero-run" href="/auth/login">Sign in with GitHub</a>
-        : <a className="hero-run" href="#workspace">Open personal workspace</a>}</div></section>
+        : storageEnabled() && <a className="hero-run" href="#workspace">Open personal workspace</a>}</div></section>
     {!session && storageEnabled() && <div id="workspace"><WorkspaceLogin/></div>}
     <section className="panel"><form action={openRepository} className="repo-picker">
       <label htmlFor="repository">GitHub repository</label><input id="repository" name="repository" required maxLength={180}
@@ -61,9 +64,9 @@ export async function Tracker({ query }: { query: Record<string,string | string[
         <article className="panel"><h3>Latest published release</h3><p className="metric">{metrics.releases[0]?.tag_name || 'None'}</p>
           <p>{metrics.releases[0]?.published_at?.slice(0,10) || 'No published releases in the sample'}</p></article>
         <article className="panel"><h3>Workflow success</h3><p className="metric">{metrics.completed ? Math.round(100*metrics.successes/metrics.completed)+'%' : '—'}</p>
-          <p>{metrics.successes} of {metrics.completed} completed runs in the latest {metrics.runs?.length ?? 0}</p></article>
+          <p>{metrics.runs ? `${metrics.successes} of ${metrics.completed} completed runs in the latest ${metrics.runs.length}` : 'Workflow data unavailable'}</p></article>
         <article className="panel"><h3>Workflow elapsed p95</h3><p className="metric">{metrics.p95 === null ? '—' : Math.round(metrics.p95)+' s'}</p>
-          <p>Start to last update across {metrics.timed} completed runs</p></article></div>
+          <p>{metrics.runs ? `Start to last update across ${metrics.timed} completed runs` : 'Workflow data unavailable'}</p></article></div>
       <section className="panel tracker-section"><h2>ReleaseTrace gate</h2>
         {metrics.commit && <p>Default branch head <a href={base+'/commit/'+metrics.commit.sha}><code>{metrics.commit.sha.slice(0,12)}</code></a></p>}
         {metrics.checks?.length ? metrics.checks.map(c => <p key={c.id}><a href={base+'/runs/'+c.id}>{c.name}</a> · {c.conclusion || c.status} · published by {c.app?.slug}</p>)

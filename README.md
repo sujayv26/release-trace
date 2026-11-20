@@ -12,6 +12,14 @@
 
 The tracker stores accounts in a private Vercel Blob store. Existing workspace owners enroll at their next sign-in. GitHub App sign-in, when configured, uses GitHub's repository permissions. The invite-only release review API controls evaluation evidence and approvals. [Tracker configuration](docs/LIVE_PILOT.md#deploy-the-live-tracker)
 
+### Run the tracker browser tests
+
+To test the tracker locally, run `npm ci` and `npm run build` in `dashboard/`.
+Open **Testing** in VS Code and run the Playwright dashboard tests, or run
+`npx playwright test` from that directory. The suite uses local GitHub fixtures.
+Windows uses installed Edge. On Linux or macOS, install the test browser with
+`npx playwright install chromium`.
+
 ## Two-minute public walkthrough
 
 1. Open the [synthetic walkthrough](https://releasetrace-checkout-demo.excellentplover16.chatgpt.site/) in a private browser window and select **Blocked candidate**. The synthetic checkout assistant has one critical case about rolling back a deployment.
