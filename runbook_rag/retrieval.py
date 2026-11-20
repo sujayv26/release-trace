@@ -24,8 +24,32 @@ def keywords(text: str) -> set[str]:
     return set(TOKEN.findall(text.lower())) - STOP_WORDS
 
 
-def build_index(database: Path, corpus: Path = DATA / "runbooks.json", *, stale_checkout=False) -> None:
-    records = json.loads(corpus.read_text(encoding="utf-8"))
+def read_corpus(corpus: Path) -> bytes:
+    with corpus.open("rb") as stream:
+        raw = stream.read(2_000_001)
+    if len(raw) > 2_000_000:
+        raise ValueError("Runbook corpus exceeds 2 MB")
+    return raw
+
+
+def build_index(database: Path, corpus: Path = DATA / "runbooks.json", *, stale_checkout=False,
+                snapshot: bytes | None = None) -> None:
+    records = json.loads(read_corpus(corpus) if snapshot is None else snapshot)
+    if not isinstance(records, list) or not 1 <= len(records) <= 512:
+        raise ValueError("Runbook corpus requires 1 to 512 passages")
+    ids = set()
+    for index, record in enumerate(records, 1):
+        if not isinstance(record, dict):
+            raise ValueError(f"Invalid runbook passage {index}")
+        source, title, excerpt = (record.get(key) for key in ("id", "title", "excerpt"))
+        if (not isinstance(source, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}", source)
+                or source in ids or record.get("status") not in ("active", "superseded")
+                or not isinstance(title, str) or not title.strip() or len(title) > 200
+                or not isinstance(excerpt, str) or not excerpt.strip() or len(excerpt) > 3000):
+            raise ValueError(f"Invalid runbook passage {index}")
+        ids.add(source)
+    if not any(record["status"] == "active" for record in records):
+        raise ValueError("Runbook corpus requires at least one active passage")
     active = {record["id"] for record in records if record["status"] == "active"}
     if stale_checkout:
         active.remove("checkout-rollback-v2")
