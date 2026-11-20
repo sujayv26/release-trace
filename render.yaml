@@ -1,0 +1,66 @@
+projects:
+  - name: releasetrace-pilot
+    environments:
+      - name: pilot
+        services:
+          - name: releasetrace-pilot-api
+            type: web
+            runtime: docker
+            branch: develop
+            region: oregon
+            plan: 0.5c-512mb
+            autoDeployTrigger: 'off'
+            dockerfilePath: ./service/Dockerfile
+            preDeployCommand: python -m service.store
+            healthCheckPath: /readyz
+            envVars:
+              - key: PORT
+                value: '8000'
+              - key: RELEASETRACE_DATABASE_URL
+                fromDatabase:
+                  name: releasetrace-pilot-db
+                  property: connectionString
+              - key: RELEASETRACE_PROJECTS_FILE
+                value: /etc/secrets/projects.json
+              - key: RELEASETRACE_WEBHOOK_SECRET
+                generateValue: true
+          - name: releasetrace-pilot-dashboard
+            type: web
+            runtime: docker
+            branch: develop
+            region: oregon
+            plan: 0.5c-512mb
+            autoDeployTrigger: 'off'
+            dockerfilePath: ./dashboard/Dockerfile
+            healthCheckPath: /
+            envVars:
+              - key: RELEASETRACE_API_HOSTPORT
+                fromService:
+                  name: releasetrace-pilot-api
+                  type: web
+                  property: hostport
+          - name: releasetrace-pilot-worker
+            type: worker
+            runtime: docker
+            branch: develop
+            region: oregon
+            plan: 0.5c-512mb
+            autoDeployTrigger: 'off'
+            dockerfilePath: ./service/Dockerfile
+            dockerCommand: python -m service.worker
+            envVars:
+              - key: RELEASETRACE_DATABASE_URL
+                fromDatabase:
+                  name: releasetrace-pilot-db
+                  property: connectionString
+              - key: RELEASETRACE_REQUIRE_APPROVED_DESTINATIONS
+                value: '1'
+              - key: RELEASETRACE_APPROVED_EVALUATION_URLS
+                sync: false
+        databases:
+          - name: releasetrace-pilot-db
+            databaseName: releasetrace
+            postgresMajorVersion: '16'
+            region: oregon
+            plan: 0.1c-256mb
+            ipAllowList: []

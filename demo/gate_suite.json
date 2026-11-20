@@ -1,0 +1,57 @@
+{
+  "minimum_score": 0.8,
+  "cases": [
+    {
+      "case_id": "billing",
+      "question": "How do I change billing?",
+      "critical": false,
+      "required_citation": "billing-v1",
+      "policies": [
+        {
+          "id": "billing-v1",
+          "revision": 1,
+          "text": "Change billing in Settings."
+        }
+      ]
+    },
+    {
+      "case_id": "password",
+      "question": "How do I change password?",
+      "critical": false,
+      "required_citation": "password-v1",
+      "policies": [
+        {
+          "id": "password-v1",
+          "revision": 1,
+          "text": "Change password in Settings."
+        }
+      ]
+    },
+    {
+      "case_id": "notifications",
+      "question": "How do I change notifications?",
+      "critical": false,
+      "required_citation": "notifications-v1",
+      "policies": [
+        {
+          "id": "notifications-v1",
+          "revision": 1,
+          "text": "Change notifications in Settings."
+        }
+      ]
+    },
+    {
+      "case_id": "language",
+      "question": "How do I change language?",
+      "critical": false,
+      "required_citation": "language-v1",
+      "policies": [
+        {
+          "id": "language-v1",
+          "revision": 1,
+          "text": "Change language in Settings."
+        }
+      ]
+    }
+  ]
+}

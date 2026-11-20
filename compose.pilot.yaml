@@ -1,0 +1,52 @@
+# Disposable HTTPS fixtures for the local operator rehearsal.
+x-pilot-api: &pilot-api
+  build:
+    context: .
+    dockerfile: service/Dockerfile
+  environment: &pilot-env
+    RELEASETRACE_PROJECTS_FILE: /pilot/projects.json
+    RELEASETRACE_WEBHOOK_SECRET: ${RELEASETRACE_PILOT_WEBHOOK_SECRET:?Run demo.pilot_rehearsal}
+    RELEASETRACE_OPERATOR: pilot-operator
+  volumes:
+    - ${RELEASETRACE_PILOT_DIR:?Run demo.pilot_rehearsal}/projects:/pilot:ro
+
+services:
+  api:
+    <<: *pilot-api
+
+  worker:
+    environment:
+      RELEASETRACE_REQUIRE_APPROVED_DESTINATIONS: '1'
+      RELEASETRACE_APPROVED_EVALUATION_URLS: ${RELEASETRACE_PILOT_DESTINATIONS:?Run demo.pilot_rehearsal}
+    volumes:
+      # The evaluator disables environment-based trust overrides. Use a fixture-only bundle.
+      - ${RELEASETRACE_PILOT_DIR}/tls/cert.pem:/usr/local/lib/python3.12/site-packages/certifi/cacert.pem:ro
+
+  pilot-target:
+    build:
+      context: .
+      dockerfile: service/Dockerfile
+    command: [python, -m, demo.pilot_target]
+    volumes:
+      - ${RELEASETRACE_PILOT_DIR}/tls:/tls:ro
+    ports:
+      - '127.0.0.1::8443'
+    healthcheck:
+      test: [CMD, python, -c, "from ssl import create_default_context; from urllib.request import urlopen; urlopen('https://127.0.0.1:8443/requests', context=create_default_context(cafile='/tls/cert.pem'), timeout=2).close()"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  restore-api:
+    <<: *pilot-api
+    profiles: [restore]
+    environment:
+      <<: *pilot-env
+      RELEASETRACE_DATABASE_URL: postgresql+psycopg://releasetrace:local-demo-password@db:5432/releasetrace_restored
+    ports:
+      - '127.0.0.1::8000'
+    healthcheck:
+      test: [CMD, python, -c, "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/readyz', timeout=2).close()"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

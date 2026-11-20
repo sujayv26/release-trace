@@ -1,0 +1,40 @@
+[
+  {
+    "case_id": "refund-prompt",
+    "question": "How do I request a refund?",
+    "required_citation": "refund-v2",
+    "critical": false,
+    "baseline": {"prompt": "current-policy", "retrieval": "newest"},
+    "candidate": {"prompt": "legacy-policy", "retrieval": "newest"},
+    "citation_by_setting": {"setting": "prompt", "citations": {"current-policy": "refund-v2", "legacy-policy": "refund-v1"}},
+    "policies": [
+      {"id": "refund-v1", "revision": 1, "text": "Request a refund by email."},
+      {"id": "refund-v2", "revision": 2, "text": "Request a refund from your order history."}
+    ]
+  },
+  {
+    "case_id": "shipping-tool",
+    "question": "Where can I find shipping estimates?",
+    "required_citation": "shipping-v2",
+    "critical": false,
+    "baseline": {"retrieval": "newest", "tool_response": "shipping-record-current"},
+    "candidate": {"retrieval": "newest", "tool_response": "shipping-record-stale"},
+    "citation_by_setting": {"setting": "tool_response", "citations": {"shipping-record-current": "shipping-v2", "shipping-record-stale": "shipping-v1"}},
+    "policies": [
+      {"id": "shipping-v1", "revision": 1, "text": "Shipping estimates appear in the catalog."},
+      {"id": "shipping-v2", "revision": 2, "text": "Shipping estimates appear when you enter your address at checkout."}
+    ]
+  },
+  {
+    "case_id": "returns-ambiguous",
+    "question": "Where can I start a return?",
+    "required_citation": "returns-v2",
+    "critical": false,
+    "baseline": {"prompt": "current-policy", "retrieval": "newest"},
+    "candidate": {"prompt": "legacy-policy", "retrieval": "oldest"},
+    "policies": [
+      {"id": "returns-v1", "revision": 1, "text": "Start a return by contacting support."},
+      {"id": "returns-v2", "revision": 2, "text": "Start a return in the order portal."}
+    ]
+  }
+]

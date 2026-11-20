@@ -1,0 +1,15 @@
+{
+  "suite": {
+    "revision": "runbook-checkout-v1",
+    "cases": [{
+      "case_id": "checkout-rollback",
+      "question": "What is the checkout deployment rollback procedure?",
+      "required_citation": "checkout-rollback-v2",
+      "policies": [
+        {"id": "checkout-rollback-v1", "revision": 1, "text": "For a checkout deployment rollback, redeploy the last stable version immediately."},
+        {"id": "checkout-rollback-v2", "revision": 2, "text": "For a checkout deployment rollback, pause traffic promotion and get release-lead approval before restoring the last stable revision."}
+      ]
+    }]
+  },
+  "policy": {"revision": "critical-checkout-v1", "minimum_score": 1.0, "critical_cases": ["checkout-rollback"]}
+}

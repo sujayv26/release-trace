@@ -3,9 +3,24 @@
   "question": "How do I close my account?",
   "required_citation": "account-closure-v2",
   "policies": [
-    {"id": "account-closure-v1", "revision": 1, "text": "Close my account by emailing support."},
-    {"id": "account-closure-v2", "revision": 2, "text": "Close my account in Settings."}
+    {
+      "id": "account-closure-v1",
+      "revision": 1,
+      "text": "Close my account by emailing support."
+    },
+    {
+      "id": "account-closure-v2",
+      "revision": 2,
+      "text": "Close my account in Settings."
+    }
   ],
-  "baseline": {"prompt": "support-v1", "retrieval": "newest"},
-  "candidate": {"prompt": "support-v1", "retrieval": "oldest"}
+  "baseline": {
+    "prompt": "support-v1",
+    "retrieval": "newest"
+  },
+  "candidate": {
+    "prompt": "support-v1",
+    "retrieval": "oldest"
+  },
+  "critical": true
 }

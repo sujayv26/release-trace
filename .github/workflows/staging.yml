@@ -1,0 +1,116 @@
+name: ReleaseTrace canary drill
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'staging/**'
+      - 'service/**'
+      - 'demo/**'
+      - '.github/workflows/staging.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Create isolated Kubernetes cluster
+        uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3 # v1.12.0
+        with:
+          cluster_name: releasetrace
+          version: v0.27.0
+          registry: true
+          registry_port: 5001
+      - name: Install Argo Rollouts
+        run: |
+          kubectl create namespace argo-rollouts
+          kubectl apply --namespace argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/download/v1.8.3/install.yaml
+          kubectl rollout status deployment/argo-rollouts --namespace argo-rollouts --timeout=120s
+          kubectl create namespace release-drill
+      - name: Observe promotion and automatic abort
+        run: |
+          set -o pipefail
+          python staging/run_drill.py --context kind-releasetrace --namespace release-drill | tee rollout-evidence.json
+      - name: Save measured rollout evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollout-evidence
+          path: rollout-evidence.json
+      - name: Build and register evaluation images
+        id: images
+        run: |
+          docker build -t releasetrace-service:local -f service/Dockerfile .
+          registry_ip="$(docker inspect --format '{{(index .NetworkSettings.Networks "kind").IPAddress}}' kind-registry)"
+          for variant in baseline candidate; do
+            tag="localhost:5001/support:$variant"
+            docker build --provenance=false --build-arg "VARIANT=$variant" -t "$tag" -f staging/BuildTarget.Dockerfile .
+            docker push "$tag"
+            ref="$(docker image inspect --format '{{index .RepoDigests 0}}' "$tag")"
+            for node in $(kind get nodes --name releasetrace); do
+              source="$registry_ip:5000/support@${ref#*@}"
+              docker exec "$node" ctr --namespace k8s.io images pull --plain-http "$source"
+              docker exec "$node" ctr --namespace k8s.io images tag "$source" "$ref"
+              docker exec "$node" crictl inspecti "$ref" >/dev/null
+            done
+            printf 'RELEASETRACE_%s_IMAGE=%s\n' "${variant^^}" "$ref" >> "$GITHUB_ENV"
+            if [[ "$variant" == candidate ]]; then
+              printf 'candidate_digest=%s\n' "${ref#*@}" >> "$GITHUB_OUTPUT"
+            fi
+          done
+      - name: Sign provenance for the candidate image
+        id: provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: localhost:5001/support
+          subject-digest: ${{ steps.images.outputs.candidate_digest }}
+      - name: Reject a different source commit and image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTESTATION_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          workflow="$GITHUB_REPOSITORY/.github/workflows/staging.yml"
+          flags=(--repo "$GITHUB_REPOSITORY" --signer-workflow "$workflow" --bundle "$ATTESTATION_BUNDLE")
+          if gh attestation verify "oci://$RELEASETRACE_CANDIDATE_IMAGE" "${flags[@]}" --source-digest "$(printf '%040d' 0)"; then
+            echo 'Attestation accepted the wrong commit' >&2
+            exit 1
+          fi
+          if gh attestation verify "oci://$RELEASETRACE_BASELINE_IMAGE" "${flags[@]}" --source-digest "$GITHUB_SHA"; then
+            echo 'Attestation accepted the wrong image' >&2
+            exit 1
+          fi
+      - name: Evaluate, approve, and promote the same OCI image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTESTATION_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          set -o pipefail
+          python -m pip install -r service/requirements.txt
+          kubectl create namespace approved-drill
+          python -m staging.rehearse_approval --context kind-releasetrace --namespace approved-drill \
+            --baseline "$RELEASETRACE_BASELINE_IMAGE" --candidate "$RELEASETRACE_CANDIDATE_IMAGE" \
+            --commit "$GITHUB_SHA" --attested-by "$GITHUB_REPOSITORY/.github/workflows/staging.yml" \
+            --attestation-bundle "$ATTESTATION_BUNDLE" | tee approved-rollout-evidence.json
+      - name: Save approval-to-rollout evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: approved-rollout-evidence
+          path: |
+            approved-rollout-evidence.json
+            ${{ steps.provenance.outputs.bundle-path }}
+      - name: Inspect controller state on failure
+        if: failure()
+        run: |
+          kubectl get rollouts,analysisruns,replicasets,pods,services --namespace release-drill -o yaml
+          kubectl get rollouts,analysisruns,replicasets,pods,services --namespace approved-drill -o yaml || true
+          kubectl get events --namespace approved-drill --sort-by=.lastTimestamp || true
+          kubectl logs deployment/argo-rollouts --namespace argo-rollouts --tail=80
