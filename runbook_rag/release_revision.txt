@@ -1,1 +1,1 @@
-stale-candidate
+corrected-candidate

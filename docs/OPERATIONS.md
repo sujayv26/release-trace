@@ -342,6 +342,16 @@ IDs and credentials. [GitHub push event permissions](https://docs.github.com/en/
    there is exactly one from the App with that name and delivery GUID.
    [GitHub App redelivery](https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/redelivering-webhooks#redelivering-github-app-webhooks) · [Check Runs API](https://docs.github.com/en/rest/checks/runs#list-check-runs-for-a-git-reference)
 
+After maintainer authorization, use an active branch ruleset targeting the
+controlled repository's pilot merge branch. Under **Require status checks to
+pass before merging**, require the exact name `ReleaseTrace / Build evaluation`.
+Select the installed GitHub App as the expected source where available.
+Configure and deploy the candidate for each pull request head before delivering
+its push so the check matches the head SHA. From a non-bypass account, verify
+that the blocked head cannot merge and that the passing head satisfies the
+requirement. Record the ruleset ID, both head SHAs and merge-box results.
+[GitHub ruleset status checks](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-status-checks-to-pass-before-merging)
+
 ## Run evaluations with Temporal
 
 Install the optional dependencies with

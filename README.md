@@ -126,6 +126,9 @@ Install `service/requirements.txt` to run the [service tests and offline Investi
 
 ## Documentation
 
+The companion Runbook RAG service now serves the build evaluation contract.
+Review its [retrieval benchmark and pinned-image rehearsal](docs/PILOT.md#evaluate-runbook-rag).
+
 See the [restricted pilot runbook](docs/PILOT.md) for the clean-checkout Compose rehearsal, hosted configuration, destination allowlist, provenance verification, and recovery drills.
 
 The pilot rehearsal verifies that the independent queue health probe detects a stalled evaluation and clears after worker recovery. [Monitor the queue and rehearse recovery](docs/PILOT.md#rehearse-recovery-and-restore)

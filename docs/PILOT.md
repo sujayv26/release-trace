@@ -67,6 +67,62 @@ The worker checks this configuration before making requests or attaching a beare
 
 ## Collect hosted verification evidence
 
+### Evaluate Runbook RAG
+
+From the repository root, install `service/requirements.txt` and run
+`python -m runbook_rag.evaluate` for the eight-case starter regression suite.
+Run `python -m runbook_rag.benchmark` for the fixed 13-case synthetic holdout
+and per-case results. The benchmark uses the same code paths as the API,
+with 30 timed calls per case after an initial warm-up call.
+
+| Variant | Recall@3 | MRR@3 | Correct citations | Correct abstentions | p95 (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| SQLite FTS5 BM25 | 1.00 | 1.00 | 6/9 | 4/4 | 1.860 |
+| BM25 + synonym-normalized character trigram similarity | 1.00 | 1.00 | 9/9 | 4/4 | 1.735 |
+| Hybrid + title and excerpt overlap reranking | 1.00 | 1.00 | 9/9 | 4/4 | 2.009 |
+
+These local Windows Python 3.12 timings include scoring and excerpt selection
+in process. All variants retrieved zero superseded documents on the active
+corpus. Hybrid recovered three paraphrases with no measured ranking or citation
+benefit from the extra reranking step, so hybrid is the deployment default.
+The small synthetic holdout and local timing exclude network overhead. The
+service returns verbatim excerpts and makes no model calls.
+
+On a Linux Docker host with a full Git checkout, install the service requirements
+and run `bash runbook_rag/ci-rehearse.sh /tmp/runbook-evidence`. The script uses a
+disposable runner with ports 5000 and 18080–18082 available. For a manual run,
+remove only the four containers created by the script when finished. CI archives
+the gate reports, target identities, structured traces and benchmark. The
+rehearsal verifies that the stable build cites v2, the stale candidate cites
+v1 and is blocked, and the corrected candidate passes its own evaluation.
+All three must abstain on the missing-evidence question. Preserve the three
+revision commits in history so the rehearsal can rebuild them.
+
+For the hosted rehearsal, build from the same three commits for Linux amd64
+and push to the approved registry. Record each commit and registry manifest
+digest from the build job. Deploy each image using its immutable digest. Set
+`RUNBOOK_BUILD_COMMIT` and `RUNBOOK_IMAGE_DIGEST` from the verified build record
+and running deployment reference. Configure an independent random
+`RUNBOOK_ACCESS_TOKEN` for each service through Render secrets. The service
+requires valid metadata and a bearer credential at startup in release images.
+It uses the same retrieval path for `/ask` and `/evaluate`. Set readiness
+to `/health` and use dedicated candidate services without user traffic.
+[Render image deployments](https://render.com/docs/deploying-an-image)
+
+Point the managed project's evaluation file at
+`runbook_rag/data/release-suite.json`, copied as an API secret file. Pin the
+stable and current candidate identities in the project's targets file and
+configure their exact HTTPS endpoints and project-scoped tokens on the worker.
+Confirm the endpoint identities match the registry and deploy records. Rotate
+the candidate settings from stale to corrected before delivering the matching
+push. Keep the evaluator pinned to the stable build throughout.
+
+Capture the `runbook_request` events from the service log for the test window.
+They contain commit and image identity, effective index revision, corpus hash,
+cited document version, retrieval and validation durations, optional reranking
+duration, and an abstention reason. Keep questions, excerpts, and bearer tokens
+out of the verification record.
+
 ### Two-minute reviewer walkthrough
 
 Open the dashboard URL supplied with your invitation and sign in using your
@@ -85,6 +141,9 @@ approval against that digest. Sign out when finished.
 | 5 | Have a second operator onboard a test project, recover an interrupted evaluation, and restore evidence into an isolated PostgreSQL instance. | Onboarding record, detection and recovery times, one logical run and decision after recovery, and restored run, approval, and rollout IDs. |
 
 ### Verify image provenance before applying a rollout
+
+The kind canary rehearsal is covered by its own CI workflow. A hosted
+Kubernetes rollout requires a separately approved staging environment.
 
 Run from a staging operator environment with GitHub CLI and registry access.
 Set `attestation_workflow` in the managed project file to the exact workflow
