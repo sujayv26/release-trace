@@ -20,6 +20,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r service/requirements.txt
       - run: python -m unittest runbook_rag.test_api -v
+      - run: python -m service.citation_benchmark
       - run: python -m runbook_rag.evaluate
       - name: Build and evaluate three pinned images
         run: bash runbook_rag/ci-rehearse.sh "$RUNNER_TEMP/runbook-evidence"
@@ -153,6 +154,10 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r service/requirements.txt playwright==1.61.0
+      - name: Review the public walkthrough in a fresh mobile browser
+        env:
+          RELEASETRACE_TEST_BROWSER_CHANNEL: chrome
+        run: python -m demo.public_browser
       - name: Follow the pilot runbook and exercise production dashboard sessions
         env:
           RELEASETRACE_TEST_BROWSER_CHANNEL: chrome
