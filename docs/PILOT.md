@@ -7,7 +7,7 @@ and OpenSSL 1.1.1 or later on `PATH`. Run these commands from a terminal with
 access to Docker. The rehearsal uses only synthetic data.
 
 ```bash
-git clone --branch develop --single-branch https://github.com/sujayv26/release-trace.git release-trace-pilot
+git clone --branch main --single-branch https://github.com/sujayv26/release-trace.git release-trace-pilot
 cd release-trace-pilot
 python -m pip install -r service/requirements.txt
 python -m demo.pilot_rehearsal --evidence pilot-evidence.json
@@ -67,9 +67,9 @@ verification, and measured hosted canary outcomes.
 
 ## Prepare the hosted environment
 
-The [Render Blueprint](../render.yaml) defines a dashboard and an API with HTTPS ingress, a background worker, and PostgreSQL on the private network. It uses the `develop` branch and disables automatic service deploys. PostgreSQL has no public IP allowlist entries. The dashboard talks to the API over the private network. Reviewers authenticate with managed account keys. GitHub pushes require the webhook signature and a configured repository and installation.
+The [Render Blueprint](../render.yaml) defines a dashboard and an API with HTTPS ingress, a background worker, and PostgreSQL on the private network. It uses the `main` branch and disables automatic service deploys. PostgreSQL has no public IP allowlist entries. The dashboard talks to the API over the private network. Reviewers authenticate with managed account keys. GitHub pushes require the webhook signature and a configured repository and installation.
 
-Provision only in an approved pilot workspace. In Render, select the `develop` branch when creating the Blueprint. The API runs the database migration before deployment. Add `projects.json` and any referenced build target and evaluation files as API secret files under `/etc/secrets`. The API requires that configuration at startup. Verify the API's `/readyz` check before testing the dashboard or worker. Use synthetic data until the deployment and access checks have passed. [Managed project configuration](OPERATIONS.md#configure-managed-projects-and-reviewer-accounts)
+Provision only in an approved pilot workspace. In Render, select the `main` branch when creating the Blueprint. The API runs the database migration before deployment. Add `projects.json` and any referenced build target and evaluation files as API secret files under `/etc/secrets`. The API requires that configuration at startup. Verify the API's `/readyz` check before testing the dashboard or worker. Use synthetic data until the deployment and access checks have passed. [Managed project configuration](OPERATIONS.md#configure-managed-projects-and-reviewer-accounts)
 
 Set `RELEASETRACE_APPROVED_EVALUATION_URLS` on the worker. Keys are repository IDs and each value maps a variant to the exact approved HTTPS URL.
 

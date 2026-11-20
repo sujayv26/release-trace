@@ -6,7 +6,7 @@ projects:
           - name: releasetrace-pilot-api
             type: web
             runtime: docker
-            branch: develop
+            branch: main
             region: oregon
             plan: 0.5c-512mb
             autoDeployTrigger: 'off'
@@ -27,7 +27,7 @@ projects:
           - name: releasetrace-pilot-dashboard
             type: web
             runtime: docker
-            branch: develop
+            branch: main
             region: oregon
             plan: 0.5c-512mb
             autoDeployTrigger: 'off'
@@ -42,7 +42,7 @@ projects:
           - name: releasetrace-pilot-worker
             type: worker
             runtime: docker
-            branch: develop
+            branch: main
             region: oregon
             plan: 0.5c-512mb
             autoDeployTrigger: 'off'

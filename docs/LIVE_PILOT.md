@@ -11,7 +11,7 @@ python -m demo.public_site public-export
 python -m http.server --bind 127.0.0.1 --directory public-export 8080
 ```
 
-For Vercel, import ReleaseTrace as a dedicated project, set the root to the repository root, choose the **Other** framework preset, set the build command to `python3 -m demo.public_site public-export`, and set the output directory to `public-export`. Select the reviewed demo branch. Leave environment variables empty. Alternatively, deploy the four built files as a static directory using the Vercel CLI from inside the export. Enable anonymous access on the intended production URL. The existing public walkthrough is hosted on Sites. [Vercel build settings](https://vercel.com/docs/builds/configure-a-build)
+For Vercel, import ReleaseTrace as a dedicated project, set the root to the repository root, choose the **Other** framework preset, set the build command to `python3 -m demo.public_site public-export`, and set the output directory to `public-export`. Select the production branch, `main`. Leave environment variables empty. Alternatively, deploy the four built files as a static directory using the Vercel CLI from inside the export. Enable anonymous access on the intended production URL. The existing public walkthrough is hosted on Sites. [Vercel build settings](https://vercel.com/docs/builds/configure-a-build)
 
 Install Playwright and select an installed Chromium browser using `RELEASETRACE_TEST_BROWSER_CHANNEL` (CI uses `chrome`). Run `python -m demo.public_browser --url https://YOUR-DEMO-HOST/`. Verify the blocked and corrected citations, the private-project read denial, and the rejected approval POST. This host needs no connection to ReleaseTrace.
 

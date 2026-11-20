@@ -133,7 +133,7 @@ def main():
 
         run_id = str(uuid4())
         body = json.dumps({
-            "after": args.commit, "ref": "refs/heads/develop", "deleted": False,
+            "after": args.commit, "ref": "refs/heads/main", "deleted": False,
             "repository": {"id": 41}, "installation": {"id": 42},
         }).encode()
         push_headers = {
