@@ -1,7 +1,4 @@
 import 'server-only';
-import { cookies } from 'next/headers';
-
-export const accessCookie = 'releasetrace-viewer';
 type EvaluationMode = 'synthetic_fixture' | 'build_endpoints';
 
 export type Project = {
@@ -98,19 +95,21 @@ export class ReleaseApiError extends Error {
   }
 }
 
-export async function viewerToken() {
-  return (await cookies()).get(accessCookie)?.value;
-}
-
 export function historyPath(project: Project) {
   return `/v1/projects/${encodeURIComponent(project.id)}/runs`;
 }
 
-export async function readApi<T>(path: string, token: string, body?: object): Promise<T> {
+export function readApi<T>(path: string, token: string, body?: object): Promise<T> {
+  return releaseApi<T>(path, token, body ? 'POST' : 'GET', body);
+}
+
+export async function releaseApi<T>(
+  path: string, token: string, method: 'GET' | 'POST' | 'DELETE', body?: object,
+): Promise<T> {
   const host = process.env.RELEASETRACE_API_HOSTPORT;
   const base = process.env.RELEASETRACE_API_URL ?? (host ? `http://${host}` : 'http://127.0.0.1:8000');
   const response = await fetch(new URL(path, base), {
-    method: body ? 'POST' : 'GET',
+    method,
     body: body ? JSON.stringify(body) : undefined,
     headers: { Authorization: `Bearer ${token}`, ...(body && { 'Content-Type': 'application/json' }) },
     cache: 'no-store',
@@ -118,5 +117,5 @@ export async function readApi<T>(path: string, token: string, body?: object): Pr
     signal: AbortSignal.timeout(5_000),
   });
   if (!response.ok) throw new ReleaseApiError(response.status);
-  return response.json() as Promise<T>;
+  return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }

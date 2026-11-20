@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import unittest
 from contextlib import ExitStack, nullcontext, redirect_stderr, redirect_stdout
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -20,7 +20,7 @@ from .evaluate_builds import FIXTURES, BuildTargets, evaluate_builds
 from .github_check import BUILD_CHECK_NAME, check_payload, completed_run
 from .investigator import process_investigation
 from .schema import upgrade_database
-from .store import database, enqueue, process_one
+from .store import browser_sessions, database, enqueue, process_one
 
 
 class PipelineTest(unittest.TestCase):
@@ -82,6 +82,38 @@ class PipelineTest(unittest.TestCase):
                         "handle": "alpha-maintainer",
                         "projects": [{"id": "51", "organization": "alpha-team", "name": "Support", "role": "maintainer"}],
                     })
+                    self.assertEqual(client.get("/openapi.json").status_code, 404)
+                    self.assertEqual(client.get("/docs").status_code, 404)
+
+                    def sign_in(headers):
+                        result = client.post("/v1/sessions", headers=headers)
+                        self.assertEqual(result.status_code, 201)
+                        self.assertEqual(result.headers["cache-control"], "no-store")
+                        self.assertEqual(result.json()["expires_in"], 3600)
+                        token = result.json()["session_token"]
+                        self.assertNotEqual(headers["Authorization"], f"Bearer {token}")
+                        return bearer(token)
+
+                    alice_session = sign_in(alice)
+                    self.assertEqual(client.post("/v1/sessions", headers=alice_session).status_code, 401)
+                    self.assertEqual(client.get("/v1/me", headers=alice_session).json(),
+                                     client.get("/v1/me", headers=alice).json())
+                    logout = sign_in(alice)
+                    self.assertEqual(client.delete("/v1/sessions/current", headers=logout).status_code, 204)
+                    self.assertEqual(client.delete("/v1/sessions/current", headers=logout).status_code, 204)
+                    self.assertEqual(client.get("/v1/me", headers=logout).status_code, 401)
+                    expired = sign_in(alice)
+                    with engine.begin() as connection:
+                        session_hash = manage_accounts.key_hash(expired["Authorization"].split()[1])
+                        row = connection.execute(browser_sessions.select().where(
+                            browser_sessions.c.token_hash == session_hash,
+                        )).mappings().one()
+                        self.assertEqual(row["credential_hash"],
+                                         manage_accounts.key_hash(alice["Authorization"].split()[1]))
+                        connection.execute(browser_sessions.update().where(
+                            browser_sessions.c.token_hash == session_hash,
+                        ).values(expires_at=datetime.now(timezone.utc) - timedelta(seconds=1)))
+                    self.assertEqual(client.get("/v1/me", headers=expired).status_code, 401)
                     self.assertEqual(push(51, 62, "a" * 40, "forged-scope").status_code, 403)
                     self.assertEqual(push(51, 61, "a" * 40, "managed-alpha").json()["status"], "queued")
                     self.assertEqual(push(52, 62, targets.candidate.build.commit_sha, "managed-beta").json()["status"], "queued")
@@ -120,7 +152,9 @@ class PipelineTest(unittest.TestCase):
                     self.assertEqual(client.post(f"{beta}/approval", headers=alice, json=decision).status_code, 404)
                     provision("grant", "alpha-maintainer", "52", "viewer")
                     self.assertEqual(len(client.get("/v1/me", headers=alice).json()["projects"]), 2)
-                    self.assertEqual(client.get(beta, headers=alice).json()["report"]["verdict"], "pass")
+                    beta_read = client.get(beta, headers=alice_session)
+                    self.assertEqual(beta_read.json()["report"]["verdict"], "pass")
+                    self.assertEqual(beta_read.headers["cache-control"], "no-store")
                     self.assertEqual(client.post(f"{beta}/approval", headers=alice, json=decision).status_code, 403)
                     approved = client.post(f"{beta}/approval", headers=bob, json=decision).raise_for_status().json()
                     self.assertEqual(approved["actor"], "beta-approver")
@@ -155,10 +189,16 @@ class PipelineTest(unittest.TestCase):
 
                     provision("revoke", "alpha-maintainer", "52")
                     self.assertEqual(client.get(beta, headers=alice).status_code, 404)
+                    self.assertEqual(client.get(beta, headers=alice_session).status_code, 404)
                     rotated = bearer(provision("rotate", "alpha-maintainer"))
+                    self.assertEqual(client.get(alpha, headers=alice_session).status_code, 401)
                     self.assertEqual(client.get(alpha, headers=alice).status_code, 401)
                     self.assertEqual(client.get(alpha, headers=rotated).status_code, 200)
+                    rotated_session = sign_in(rotated)
                     provision("disable", "alpha-maintainer")
+                    denied = client.get(alpha, headers=rotated_session)
+                    self.assertEqual(denied.status_code, 401)
+                    self.assertEqual(denied.headers["cache-control"], "no-store")
                     self.assertEqual(client.get(alpha, headers=rotated).status_code, 401)
 
                 history = json.loads(provision("history", "--handle", "alpha-maintainer"))

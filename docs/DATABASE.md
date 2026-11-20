@@ -9,6 +9,7 @@ ReleaseTrace uses SQLAlchemy and Alembic. PostgreSQL backs Compose and the integ
 | `approvals` | One decision per delivery. Stores the exact image digest, decision, actor, and creation timestamp. |
 | `deployments` | Append-only operator observations keyed by approved delivery, Rollout UID, generation, and outcome. Stores the target and stable image digests and when the API recorded the outcome. |
 | `accounts` | Reviewer handle and a unique access-key hash. A disabled account has no active key hash. |
+| `browser_sessions` | Hashed opaque session token, issuing credential fingerprint, and expiry. The expiry index supports pruning during sign-in. |
 | `project_owners` | Persistent binding from a managed GitHub repository ID to an organization slug. |
 | `project_memberships` | A reviewer role scoped to the account handle, repository, installation, and organization. |
 | `account_access_events` | Successful operator account commands with time, account, operator label when supplied, and project scope for grant and revoke. Written in the same transaction as the command. |
@@ -17,6 +18,6 @@ The worker saves the evaluation claim and report in one transaction. An interrup
 
 Project-specific inputs store the full, normalized suite and gate policy with their revision labels and fingerprints. Both the worker and case evidence API read the saved snapshot. Completed reports include the revisions and fingerprints shown in the dashboard.
 
-Run `python -m service.store` with the configured `RELEASETRACE_DATABASE_URL` before starting an updated API or worker. The migration head is `0008_account_access_events`. The migration test covers adoption of a legacy schema and preservation of saved reports. Older runs can have missing timestamps.
+Run `python -m service.store` with the configured `RELEASETRACE_DATABASE_URL` before starting an updated API or worker. The migration head is `0009_browser_sessions`. The migration test covers adoption of a legacy schema and preservation of saved reports. Older runs can have missing timestamps.
 
 `python -m service.accounts history` lists commands recorded after the audit migration. Access keys and their hashes are excluded from this history. Approval and rollout audit evidence remains in the `approvals` and `deployments` tables. Evidence retention policies are future work.

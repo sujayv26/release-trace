@@ -1,36 +1,33 @@
 'use server';
 
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { accessCookie, readApi, ReleaseApiError, viewerToken } from '../lib/releases';
+import { readApi, ReleaseApiError } from '../lib/releases';
+import { beginBrowserSession, endBrowserSession, sessionToken } from '../lib/session';
 
 export async function signIn(form: FormData) {
   const token = form.get('token');
   if (typeof token !== 'string' || !/^[!-~]{1,512}$/.test(token)) redirect('/?access=invalid');
   try {
-    await readApi('/v1/me', token);
+    await beginBrowserSession(token);
   } catch (error) {
     if (error instanceof ReleaseApiError && error.status === 401) redirect('/?access=invalid');
     redirect('/?access=unavailable');
   }
-  (await cookies()).set(accessCookie, token, {
-    httpOnly: true,
-    sameSite: 'strict',
-    secure: process.env.NODE_ENV === 'production',
-    path: '/',
-    maxAge: 8 * 60 * 60,
-  });
   redirect('/');
 }
 
 export async function signOut() {
-  (await cookies()).delete(accessCookie);
+  try {
+    await endBrowserSession();
+  } catch {
+    // The browser cookie was cleared even if the API was temporarily unavailable.
+  }
   redirect('/');
 }
 
 export async function recordDecision(id: string, imageDigest: string, form: FormData) {
   if (!/^[A-Za-z0-9-]{1,128}$/.test(id)) redirect('/');
-  const token = await viewerToken();
+  const token = await sessionToken();
   if (!token) redirect('/');
   const path = `/runs/${id}`;
   const decision = form.get('decision');
@@ -46,7 +43,7 @@ export async function recordDecision(id: string, imageDigest: string, form: Form
 
 export async function startInvestigation(id: string, caseId: string) {
   if (!/^[A-Za-z0-9-]{1,128}$/.test(id)) redirect('/');
-  const token = await viewerToken();
+  const token = await sessionToken();
   if (!token) redirect('/');
   const path = `/runs/${id}`;
   let investigationId: string;

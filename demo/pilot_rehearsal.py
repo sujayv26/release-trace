@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 import ssl
 import subprocess
 from contextlib import ExitStack
@@ -157,6 +158,8 @@ def record_and_restore(compose, directory, path, alpha, key):
             "Observation retry did not preserve the original record")
     original = alpha.get(path).raise_for_status().json()
     require(original["approval"] == approval and original["deployment"] == deployment, "Run is missing saved records")
+    session = alpha.post("/v1/sessions").raise_for_status().json()["session_token"]
+    session_headers = {"Authorization": f"Bearer {session}"}
     db = ("exec", "-T", "db")
     with (directory / "release.dump").open("w+b") as backup:
         compose(*db, "pg_dump", "-U", "releasetrace", "-Fc", "releasetrace", stdout=backup)
@@ -164,22 +167,31 @@ def record_and_restore(compose, directory, path, alpha, key):
         backup.seek(0)
         compose(*db, "pg_restore", "-U", "releasetrace", "--exit-on-error", "--single-transaction", "-d",
                 "releasetrace_restored", stdin=backup)
+    cleared = compose("run", "--rm", "-T", "--no-deps", "restore-api", "python", "-m",
+                      "service.authentication", "clear-sessions", "--confirm", capture=True)
+    require(any(re.fullmatch(r"Cleared [1-9][0-9]* browser sessions\.", line) for line in cleared.splitlines()),
+            "Restore did not invalidate the copied browser sessions")
+    require(alpha.get(path, headers=session_headers).status_code == 200, "Restore affected the source session")
     compose("up", "-d", "--wait", "--wait-timeout", "90", "restore-api")
     address = compose("port", "restore-api", "8000", capture=True).strip()
     with httpx.Client(base_url=f"http://{address}", headers={"Authorization": f"Bearer {key}"}, trust_env=False) as client:
+        require(client.get(path, headers=session_headers).status_code == 401,
+                "Restored API accepted a session copied from the source")
+        new_session = client.post("/v1/sessions").raise_for_status().json()["session_token"]
+        client.headers["Authorization"] = f"Bearer {new_session}"
         require(client.get(path).raise_for_status().json() == original, "Restored API returned different release records")
         require(client.get(f"{path}/cases").raise_for_status().json()
                 == alpha.get(f"{path}/cases").raise_for_status().json(), "Restored API returned different case evidence")
     command = ("python", "-m", "service.accounts", "history")
     source_audit = json.loads(compose("exec", "-T", "api", *command, capture=True))
     restored_audit = json.loads(compose("exec", "-T", "restore-api", *command, capture=True))
-    require(len(source_audit) == 5 and restored_audit == source_audit, "Restore returned different access history")
+    require(source_audit and restored_audit == source_audit, "Restore returned different access history")
     return {"approval": approval, "rollout_observation": deployment, "observation_source": "synthetic fixture",
             "restore_database": "releasetrace_restored", "api_run_and_cases_match": True,
-            "restored_access_events": len(restored_audit)}
+            "restored_access_events": len(restored_audit), "restored_session_status": 401}
 
 
-def exercise(compose, directory, secret):
+def exercise(compose, directory, secret, *, browser=False):
     compose("up", "--build", "-d", "--wait", "--wait-timeout", "90")
     api_url = "http://" + compose("port", "api", "8000", capture=True).strip()
     target_url = "https://" + compose("port", "pilot-target", "8443", capture=True).strip()
@@ -198,18 +210,26 @@ def exercise(compose, directory, secret):
         cross_reads = [alpha.get("/v1/runs/pilot-beta").status_code, beta.get("/v1/runs/pilot-alpha").status_code]
         require(cross_reads == [404, 404], "Cross-project read did not fail closed")
         api_url, denial = verify_denial(compose, directory / "projects", secret, alpha, beta, target)
-        compose("exec", "-T", "api", "python", "-m", "service.accounts", "disable", "beta")
+        browser_evidence = None
+        if browser:
+            from demo.pilot_browser import exercise_browser
+
+            dashboard_url = "http://" + compose("port", "dashboard", "3000", capture=True).strip()
+            browser_evidence = exercise_browser(compose, dashboard_url, alpha, alpha_key, beta_key, PROJECTS["beta"][0])
+        else:
+            compose("exec", "-T", "api", "python", "-m", "service.accounts", "disable", "beta")
         revoked_status = beta.get("/v1/runs/pilot-beta").status_code
         require(revoked_status == 401, "Disabled reviewer key still has access")
         path, recovery = recover(compose, api_url, secret, alpha, target)
         restored = record_and_restore(compose, directory, path, alpha, alpha_key)
     return {"projects": projects, "cross_project_statuses": cross_reads, "revoked_key_status": revoked_status,
-            "destination_denial": denial, "recovery": recovery, "restored": restored}
+            "destination_denial": denial, "recovery": recovery, "restored": restored, "browser": browser_evidence}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--evidence", type=Path, default=Path("pilot-evidence.json"))
+    parser.add_argument("--browser", action="store_true", help="Verify production dashboard sessions in Chromium")
     args = parser.parse_args()
     with TemporaryDirectory(prefix="releasetrace-pilot-") as temporary:
         directory = Path(temporary)
@@ -242,10 +262,13 @@ def main():
             return result.stdout.decode() if capture else None
 
         try:
-            evidence = exercise(compose, directory, secret)
+            evidence = exercise(compose, directory, secret, browser=args.browser)
         except Exception:
             compose("ps", "-a", check=False)
-            compose("logs", "--tail", "60", check=False)
+            # Browser checks can fail specifically because a credential appeared in a log.
+            # Keep raw service logs out of the browser job's failure output.
+            if not args.browser:
+                compose("logs", "--tail", "60", check=False)
             raise
         finally:
             compose("--profile", "restore", "down", "--volumes", "--remove-orphans")

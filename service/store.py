@@ -69,6 +69,13 @@ accounts = Table(
     Column("handle", String(64), primary_key=True),
     Column("key_hash", String(64), unique=True),
 )
+browser_sessions = Table(
+    "browser_sessions",
+    metadata,
+    Column("token_hash", String(64), primary_key=True),
+    Column("credential_hash", String(64), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False, index=True),
+)
 project_owners = Table(
     "project_owners",
     metadata,
