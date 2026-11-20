@@ -13,9 +13,9 @@ from service.evaluation_config import read_evaluation
 from .retrieval import DATA
 
 
-def rehearse(path):
+def rehearse(path, token=None):
     raw = json.loads(path.read_bytes())
-    token = os.environ["RUNBOOK_ACCESS_TOKEN"]
+    token = token or os.environ["RUNBOOK_ACCESS_TOKEN"]
     headers = {"Authorization": f"Bearer {token}"}
     evidence = {}
     targets_by_run = {
