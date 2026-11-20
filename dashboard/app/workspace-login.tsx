@@ -32,6 +32,10 @@ export function WorkspaceLogin() {
         <button className="primary" disabled={pending}>Sign in</button>
       </form>
       <form action={submit}><button className="quiet" name="intent" value="create" disabled={pending}>Create free workspace</button></form>
+      <details className="tracker-section"><summary>Lost your authenticator or workspace key?</summary>
+        <p>On your new device, add a time-based authenticator entry using your saved setup key. Sign in with the new code and your original workspace key.</p>
+        <p>If either key is missing and you cannot sign in, create a new workspace and add your public repositories again.</p>
+      </details>
     </>}
     {state.error && <p role="alert">{state.error}</p>}</section>;
 }

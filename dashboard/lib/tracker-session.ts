@@ -58,13 +58,14 @@ export async function issueSession(token:string) {
   }
   await startSession(id,user.login,token);
 }
+export class WorkspaceSignupLimit extends Error {}
 export async function createWorkspaceKey() {
   const source = (await headers()).get('x-vercel-forwarded-for') || (await headers()).get('x-real-ip') || 'local';
   const day = new Date().toISOString().slice(0,10);
   const quota = 'tracker/signup/'+hash(day+'|'+source)+'.json';
   for (let attempt=0;attempt<4;attempt++) {
     const record=await read<number>(quota);
-    if ((record?.data || 0)>=8) throw new Error('Workspace creation limit reached');
+    if ((record?.data || 0)>=8) throw new WorkspaceSignupLimit();
     try { await put(quota,JSON.stringify((record?.data || 0)+1),{...options,ifMatch:record?.etag,ttlDays:1}); break; }
     catch(e) { if (attempt===3 || !(e instanceof BlobPreconditionFailedError || !record)) throw e; }
   }
@@ -91,6 +92,14 @@ function enrollmentSeed(ticket:string, id:string): string | null {
     const setup = JSON.parse(decrypt(ticket));
     return setup.purpose==='enroll' && setup.id===id && setup.expires>Date.now() ? setup.secret : null;
   } catch { return null; }
+}
+
+export async function resumeEnrollment(key:string, ticket:string) {
+  const id = workspaceId(key);
+  const secret = id && enrollmentSeed(ticket, id);
+  if (!id || !secret) return null;
+  const account = await read<Workspace>(workspacePath(id));
+  return account && !account.data.authenticator ? {secret, ticket} : null;
 }
 
 export async function signInKey(key:string, code:string, ticket:string) {

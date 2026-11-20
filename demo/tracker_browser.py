@@ -27,6 +27,13 @@ def workspace(page, url):
     if not re.fullmatch(r"rtw_[\w-]{43}", value):
         raise RuntimeError("Workspace creation returned an invalid key")
     secret = page.locator(".authenticator-secret").inner_text()
+    initial_step = int(time.time()) // 30
+    valid = {authenticator_code(secret, initial_step + offset) for offset in range(-2, 3)}
+    incorrect = next(f"{i:06d}" for i in range(6) if f"{i:06d}" not in valid)
+    page.get_by_label("Authenticator code").fill(incorrect)
+    page.get_by_role("button", name="Verify and open workspace").click()
+    expect(page.get_by_role("alert").filter(has_text="same authenticator entry")).to_be_visible()
+    assert page.locator(".authenticator-secret").inner_text() == secret
     step = int(time.time()) // 30
     code = authenticator_code(secret, step)
     assert not any(c["name"] == "__Host-rt-tracker" for c in page.context.cookies())

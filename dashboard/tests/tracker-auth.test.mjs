@@ -56,12 +56,16 @@ test('workspace sign-in upgrades existing keys, binds setup, limits retries and 
   t.mock.timers.tick(610000);
   assert.equal(await auth.signInKey(other,new TOTP({secret:expired.secret}).generate(),expired.ticket),false);
   const current = await auth.beginEnrollment(key);
+  assert.deepEqual(await auth.resumeEnrollment(key,current.ticket),current);
+  assert.equal(await auth.resumeEnrollment(other,current.ticket),null);
+  assert.equal(await auth.resumeEnrollment(other,expired.ticket),null);
   const authenticator = new TOTP({secret:current.secret});
   const first = authenticator.generate();
   assert.equal(await auth.trackerSession(),null);
   const parallel = await Promise.all([1,2].map(()=>auth.signInKey(key,first,current.ticket)));
   assert.deepEqual(parallel.sort(),[false,true]);
   assert.equal(await auth.beginEnrollment(key),null);
+  assert.equal(await auth.resumeEnrollment(key,current.ticket),null);
   const session = await auth.trackerSession();
   await auth.changeRepository(session.userId,3,true);
   assert.equal(await auth.logoutTracker(),undefined);
