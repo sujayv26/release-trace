@@ -89,6 +89,15 @@ python -m unittest discover -s demo -v
 
 For a real HTTP citation example, the companion **Runbook RAG** application answers from versioned runbooks. CI builds three revisions from distinct commits and evaluates them by OCI digest. [Runbook benchmark and reproduction steps](docs/PILOT.md#evaluate-runbook-rag)
 
+### Use your own runbooks
+
+Mount a versioned JSON corpus and set \`RUNBOOK_CORPUS_FILE\`. The service
+indexes active passages on startup. It returns verbatim evidence and citations
+through \`/ask\`, and preserves the ReleaseTrace \`/evaluate\` contract. The
+default embedded fixture still runs without credentials. Operators can opt in
+to OpenAI embeddings and model-assisted quote selection.
+[Corpus format, configuration, and operating limits](docs/PILOT.md#use-your-own-runbook-corpus)
+
 ## Verification and rollout evidence
 
 | What was tested | What the evidence shows |

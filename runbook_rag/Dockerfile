@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 WORKDIR /app
-RUN pip install --no-cache-dir fastapi==0.141.1 uvicorn==0.52.1
+RUN pip install --no-cache-dir fastapi==0.141.1 uvicorn==0.52.1 httpx==0.28.1
 COPY runbook_rag/ runbook_rag/
 ENV RUNBOOK_REQUIRE_RELEASE=1
 USER 10001

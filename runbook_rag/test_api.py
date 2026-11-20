@@ -1,10 +1,16 @@
+from hashlib import sha256
+import json
 import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+import httpx
 from fastapi.testclient import TestClient
 
 from . import api
+from .grounding import OpenAIBackend
 
 
 class RunbookAPITest(unittest.TestCase):
@@ -36,3 +42,101 @@ class RunbookAPITest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "valid build identity"):
                 with TestClient(api.app):
                     self.fail("Incomplete release configuration started")
+
+    def test_custom_release_corpus_is_pinned_and_excludes_old_version(self):
+        records = [
+            {"id": "inventory-v1", "title": "Inventory snapshot", "status": "superseded",
+             "excerpt": "For inventory snapshot restoration, overwrite the production database."},
+            {"id": "inventory-v2", "title": "Inventory snapshot", "status": "active",
+             "excerpt": "For inventory snapshot restoration, run the isolated staging restore."},
+        ]
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "passages.json"
+            raw = json.dumps(records).encode()
+            path.write_bytes(raw)
+            config = {
+                "RUNBOOK_CORPUS_FILE": str(path),
+                "RUNBOOK_BUILD_COMMIT": "a" * 40,
+                "RUNBOOK_IMAGE_DIGEST": "sha256:" + "b" * 64,
+                "RUNBOOK_ACCESS_TOKEN": "t" * 32,
+            }
+            with patch.dict(os.environ, config, clear=True):
+                with self.assertRaisesRegex(RuntimeError, "corpus digest"):
+                    with TestClient(api.app):
+                        self.fail("Unpinned corpus started")
+                os.environ["RUNBOOK_CORPUS_SHA256"] = sha256(raw).hexdigest()
+                headers = {"Authorization": "Bearer " + config["RUNBOOK_ACCESS_TOKEN"]}
+                question = {"question": "Inventory snapshot restoration"}
+                with TestClient(api.app) as client:
+                    response = client.post("/ask", json=question, headers=headers).json()
+                    self.assertEqual(response["citations"][0]["id"], "inventory-v2")
+                path.write_bytes(raw + b" ")
+                with self.assertRaisesRegex(RuntimeError, "corpus digest"):
+                    with TestClient(api.app):
+                        self.fail("Modified corpus started")
+
+    def test_dense_retrieval_rejects_unsupported_quotes_and_handles_provider_failure(self):
+        scenarios = (
+            ("valid", "How can we revert that change?", "checkout-rollback-v2"),
+            ("fabricated", "How can we revert that change?", None),
+            ("wrong-source", "How can we revert that change?", None),
+            ("abstain", "Checkout deployment rollback", None),
+            ("timeout", "Checkout deployment rollback", "checkout-rollback-v2"),
+            ("embedding-timeout", "Checkout deployment rollback", "checkout-rollback-v2"),
+        )
+        passage = "pause traffic promotion and get release-lead approval"
+        for mode, question, expected in scenarios:
+            with self.subTest(mode=mode):
+                selected_calls = []
+
+                def respond(request):
+                    body = json.loads(request.content)
+                    if request.url.path.endswith("/embeddings"):
+                        texts = body["input"]
+                        if len(texts) == 1 and mode == "embedding-timeout":
+                            raise httpx.ReadTimeout("test timeout", request=request)
+                        return httpx.Response(200, json={"data": [
+                            {"index": i, "embedding": [1, 0] if len(texts) == 1
+                             or "pause traffic promotion" in text else [0, 1]}
+                            for i, text in reversed(list(enumerate(texts)))
+                        ]})
+                    selected_calls.append(body)
+                    self.assertFalse(body["store"])
+                    self.assertTrue(body["text"]["format"]["strict"])
+                    self.assertNotIn("checkout-rollback-v1", body["input"])
+                    if mode == "timeout":
+                        raise httpx.ReadTimeout("test timeout", request=request)
+                    evidence = [] if mode == "abstain" else [{
+                        "id": "unknown" if mode == "wrong-source" else "checkout-rollback-v2",
+                        "quote": "Resume traffic immediately." if mode == "fabricated" else passage,
+                    }]
+                    return httpx.Response(200, json={"status": "completed", "output": [
+                        {"type": "message", "content": [
+                            {"type": "output_text", "text": json.dumps({"evidence": evidence})}
+                        ]}
+                    ]})
+
+                with httpx.Client(base_url="https://api.openai.com/v1/",
+                                  transport=httpx.MockTransport(respond)) as mock_provider:
+                    backend = OpenAIBackend(mock_provider, "test-embedding", "test-answer", 0.45)
+                    config = {"RUNBOOK_BUILD_COMMIT": "a" * 40,
+                              "RUNBOOK_IMAGE_DIGEST": "sha256:" + "b" * 64,
+                              "RUNBOOK_ACCESS_TOKEN": "t" * 32}
+                    with (patch.dict(os.environ, config, clear=True),
+                          patch.object(api, "openai_backend", return_value=backend),
+                          TestClient(api.app) as client):
+                        headers = {"Authorization": "Bearer " + config["RUNBOOK_ACCESS_TOKEN"]}
+                        answer = client.post("/ask", json={"question": question}, headers=headers)
+                        self.assertEqual(answer.status_code, 200)
+                        result = answer.json()
+                        self.assertEqual([doc["id"] for doc in result["citations"]],
+                                         [expected] if expected else [])
+                        if mode == "valid":
+                            self.assertEqual(result["answer"], passage)
+                        if expected is None:
+                            self.assertIsNone(result["answer"])
+                        evaluation = client.post("/evaluate", headers=headers, json={
+                            "case_id": "grounded-test", "question": question,
+                        })
+                        self.assertEqual(evaluation.json()["citation"], expected)
+                self.assertEqual(len(selected_calls), 0 if mode == "embedding-timeout" else 2)
