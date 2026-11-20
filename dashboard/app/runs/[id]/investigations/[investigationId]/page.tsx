@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { Evidence, Status } from '../../../../components';
-import { type Investigation, readApi, ReleaseApiError, viewerToken } from '../../../../../lib/releases';
+import { type Investigation, readApi, ReleaseApiError } from '../../../../../lib/releases';
+import { sessionToken } from '../../../../../lib/session';
 
 const findings: Record<string, string> = {
   restored_expected_citation: 'The controlled rerun brought back the expected citation.',
@@ -21,7 +22,7 @@ export default async function InvestigationPage({ params }: {
 }) {
   const { id, investigationId } = await params;
   if (!/^[A-Za-z0-9-]{1,128}$/.test(id) || !/^[a-f0-9]{64}$/.test(investigationId)) notFound();
-  const token = await viewerToken();
+  const token = await sessionToken();
   if (!token) redirect('/');
   const runPath = `/runs/${id}`;
   const path = `${runPath}/investigations/${investigationId}`;

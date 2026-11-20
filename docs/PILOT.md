@@ -21,6 +21,23 @@ destination enforcement as the hosted setup. Reviewer keys and the temporary
 database dump stay out of the printed evidence. Keep the generated JSON as the
 record of the rehearsal.
 
+To include Chromium sign-in and authorization checks, install the test-only
+browser dependency and use the same rehearsal as CI. CI uses Chrome from its
+runner image, and local runs use Playwright's bundled Chromium:
+
+```bash
+python -m pip install playwright==1.61.0
+python -m playwright install chromium
+python -m demo.pilot_rehearsal --browser --evidence pilot-evidence.json
+```
+
+Chromium exercises the production dashboard over a loopback URL. The browser
+checks the Secure, HttpOnly, SameSite=Strict cookie and its one-hour lifetime.
+The expiry check ages one row in the disposable database. The result records
+statuses without collecting keys, cookies, browser traces, or page snapshots.
+On Linux, use `python -m playwright install --with-deps chromium` if system
+dependencies are absent.
+
 1. Check that `pilot-alpha` passes `refund-window` and `pilot-beta` passes
    `password-reset`, each with its own suite and gate revision and fingerprints.
    The command creates individual keys with `service.accounts`. Expect `404`
@@ -37,10 +54,12 @@ record of the rehearsal.
 4. The alpha approver records a decision on the recovered passing build and
    submits a synthetic `aborted` rollout observation. Both retries must return
    their original records. The command uses `pg_dump` and `pg_restore` to copy
-   the records into `releasetrace_restored`, then starts a separate API against
+   the records into `releasetrace_restored`, clears copied browser sessions,
+   then starts a separate API against
    it. The returned run, case evidence, approval, and rollout must match the
    source API exactly. The drill also checks that the operator audit history
-   in the restored database matches the source.
+   in the restored database matches the source. A session valid on the source
+   receives HTTP 401 from the restored API.
 
 This drill uses a locally signed GitHub-shaped delivery and a synthetic rollout
 observation. Follow the hosted checklist for GitHub App delivery, attestation
@@ -64,6 +83,43 @@ Set `RELEASETRACE_APPROVED_EVALUATION_URLS` on the worker. Keys are repository I
 ```
 
 The worker checks this configuration before making requests or attaching a bearer credential. In the pilot, `RELEASETRACE_REQUIRE_APPROVED_DESTINATIONS=1` makes omitted or invalid approval configuration deny evaluation requests. Removing a URL also stops it from being used by already queued runs. Record the denial as `destination_not_approved` in the case report. Configure any repository-specific evaluation credentials on the worker, and grant reviewer keys privately from the operator CLI. [Application HTTP contract](OPERATIONS.md#application-evaluation-http-contract)
+
+### Configure public ingress limits
+
+Keep the dashboard and API behind an approved edge that supports per-route
+limits. Apply controls to public traffic, leaving the dashboard's private
+API connection available. Start with these test settings and adjust thresholds
+in the edge policy after observing pilot traffic and shared-IP behavior.
+
+| Public route | Starting policy per source IP |
+| --- | --- |
+| Dashboard `POST /` | 10 per minute. This covers Next.js sign-in and sign-out actions on the home page. |
+| API `POST /v1/sessions` | 10 per minute to cover direct session issuance. |
+| Other API `/v1/*` | 120 per minute for evidence and operator traffic. Exclude session issuance from this rule. |
+| API `POST /webhooks/github` | Separate bucket starting at 120 per minute. Retain signature verification and return 429 on excess traffic. Browser challenges would prevent delivery. |
+
+For a Cloudflare WAF deployment, match the service hostname, method where
+shown, and normalized route. Count by the edge-observed client address and
+use a block response with HTTP 429. Confirm that the approved edge plan
+supports the required rule count and matching fields. On Render, attach
+the custom domains, disable the default Render subdomains, and restrict
+public origin access to the edge's network using inbound IP rules where
+supported. If the selected plan cannot protect the origin, use an approved
+gateway with private backends. Verify from outside the edge that direct
+origin requests cannot bypass the controls. Keep `/readyz` available to
+Render's health checker.
+[Cloudflare rate limit configuration](https://developers.cloudflare.com/waf/rate-limiting-rules/)
+· [Render inbound IP rules](https://render.com/docs/inbound-ip-rules)
+· [Render custom domains](https://render.com/docs/custom-domains)
+
+In a controlled environment, temporarily lower each test threshold, confirm
+that legitimate requests below it succeed, then check for HTTP 429 when
+exceeding it from the same test source. Confirm normal sign-in and API
+access after the window passes. While the reviewer bucket is limited,
+deliver and redeliver one signed GitHub event. Expect HTTP 202 for both and
+one evaluation and Check record. Restore the chosen thresholds and record
+the rule IDs, limits, response statuses, and timestamps. Keep credential
+headers, cookies, and request bodies out of edge logging and test artifacts.
 
 ## Collect hosted verification evidence
 
@@ -197,8 +253,22 @@ pg_dump --dbname='service=release_pilot' --format=custom --file=releasetrace.dum
 pg_restore --dbname='service=release_restore' --exit-on-error --single-transaction releasetrace.dump
 ```
 
-Start an isolated API with the restored database and the matching project
-configuration. Verify the same run result, approval actor and digest, rollout
+Keep ingress closed. In the operator environment, verify
+`RELEASETRACE_DATABASE_URL` points to the **isolated restore target**, apply
+the migration, and clear browser sessions before starting its API:
+
+```bash
+python -m service.store
+python -m service.authentication clear-sessions --confirm
+```
+
+The command prints only the number of removed sessions. Start the isolated
+API with the restored database and matching project configuration. Verify
+that a previously valid session receives HTTP 401 and that allowed reviewers
+can sign in again. If restoring a snapshot predates a key rotation or account
+change, reconcile key rotations, account disables, and project grants from
+the trusted operator record before reopening ingress.
+Verify the same run result, approval actor and digest, rollout
 outcome, and stable digest. Compare the account audit history in both databases
 using `python -m service.accounts history`. Keep the dump and audit output in
 approved storage.
