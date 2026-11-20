@@ -143,7 +143,7 @@ flowchart TB
     Engine --> Versions["🗂️ migrations/versions/ · apply revisions in order"]
     Versions --> Base["🧱 0001_webhook_deliveries.py · initial queue and run table<br/>0002_delivery_timestamps.py · run timestamps<br/>0003_github_check_delivery.py · Check publication state"]
     Base --> Evidence["📋 0004_investigations.py · case rerun reports<br/>0005_approvals.py · digest-bound decisions<br/>0006_deployments.py · observed rollout outcomes"]
-    Evidence --> Access["🔐 0007_accounts.py · reviewer accounts and project grants<br/>0008_account_access_events.py · operator audit history<br/>0009_browser_sessions.py · hashed browser sessions"]
+    Evidence --> Access["🔐 0007_accounts.py · reviewer accounts and project grants<br/>0008_account_access_events.py · operator audit history<br/>0009_browser_sessions.py · hashed browser sessions<br/>0010_access_requests.py · viewer request decisions"]
     Tests["🧪 service/test_*.py"] --> DataTests["🗄️ test_schema.py · legacy upgrade and preserved reports<br/>test_pipeline.py · API, authorization and release flow<br/>test_project_evaluation.py · scoped and pinned suites"]
     Tests --> LogicTests["🧮 test_evaluate_builds.py · build evidence and destination checks<br/>test_investigator.py · bounded reruns and diagnoses"]
     Tests --> RecoveryTests["🔁 test_github_check.py · Check payload and publishing<br/>test_check_queue.py · scoped retries and reconciliation<br/>test_temporal_worker.py · worker replacement and report recovery"]

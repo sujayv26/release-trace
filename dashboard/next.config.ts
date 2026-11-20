@@ -20,6 +20,9 @@ const config: NextConfig = {
       source: '/auth/:path*',
       headers: privatePageHeaders,
     }, {
+      source: '/access',
+      headers: privatePageHeaders,
+    }, {
       source: '/runs/:path*',
       headers: privatePageHeaders,
     }];

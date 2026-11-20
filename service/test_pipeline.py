@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from staging import promote_approved
 
 from . import accounts as manage_accounts
+from . import access_requests
 from .api import PromotionDetail, create_app
 from .evaluate_builds import FIXTURES, BuildTargets, evaluate_builds
 from .github_check import BUILD_CHECK_NAME, check_payload, completed_run
@@ -77,6 +78,25 @@ class PipelineTest(unittest.TestCase):
                         })
 
                     self.assertEqual(client.get("/v1/me", headers=bearer("legacy-viewer")).status_code, 401)
+                    self.assertEqual(client.get("/v1/me", headers=unassigned).json()["projects"], [])
+                    path = "/v1/me/access-requests"
+                    self.assertEqual(client.get(path).status_code, 401)
+                    for repo in ("51", "51", "999"):
+                        self.assertEqual(client.post(path, headers=unassigned, json={"repository_id": repo}).status_code, 202)
+                    self.assertEqual(client.get(path, headers=alice).json(), [])
+                    self.assertEqual(len(client.get(path, headers=unassigned).json()), 2)
+                    self.assertEqual(client.get("/v1/projects/51/runs", headers=unassigned).status_code, 404)
+                    with engine.begin() as connection:
+                        rows = connection.execute(access_requests.queue.select()).mappings().all()
+                        for row in rows:
+                            approve = row["repository_id"] == 51
+                            access_requests.decide(connection, row["id"], approve, "test-operator",
+                                                   manage_accounts.managed_projects(config))
+                            access_requests.decide(connection, row["id"], approve, "test-operator",
+                                                   manage_accounts.managed_projects(config))
+                    self.assertEqual(client.get("/v1/me", headers=unassigned).json()["projects"][0]["role"], "viewer")
+                    self.assertEqual({r["status"] for r in client.get(path, headers=unassigned).json()}, {"approved", "denied"})
+                    provision("revoke", "no-project", "51")
                     self.assertEqual(client.get("/v1/me", headers=unassigned).json()["projects"], [])
                     self.assertEqual(client.get("/v1/me", headers=alice).json(), {
                         "handle": "alpha-maintainer",

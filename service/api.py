@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
 from .accounts import bind_project_owners
+from . import access_requests
 from .authentication import SESSION_TTL_SECONDS, Authentication, Principal, bearer_token
 from .evaluate_builds import BuildIdentity, ImageDigest
 from .evaluation_config import EvaluationSnapshot
@@ -83,6 +84,10 @@ class ProjectSummary(BaseModel):
 class AccountSummary(BaseModel):
     handle: str | None
     projects: list[ProjectSummary]
+
+
+class ViewerRequest(BaseModel):
+    repository_id: Annotated[str, Field(pattern=r"^[1-9][0-9]{0,18}$", max_length=19)]
 
 
 class BrowserSession(BaseModel):
@@ -313,6 +318,7 @@ def create_app():
             connection.execute(select(accounts.c.handle).limit(1))
             connection.execute(select(project_memberships.c.handle).limit(1))
             connection.execute(select(browser_sessions.c.token_hash).limit(1))
+            connection.execute(select(access_requests.queue.c.id).limit(1))
         return {"status": "ready"}
 
     @app.post("/webhooks/github", response_model=Accepted, status_code=202)
@@ -372,6 +378,32 @@ def create_app():
     def end_session(request: Request):
         authentication.end_session(bearer_token(request.headers.get("authorization", "")))
         return Response(status_code=204)
+
+    @app.get("/v1/me/access-requests")
+    def own_requests(principal: Principal = Depends(authenticate)):
+        if not principal.handle:
+            raise ReadError(403, "account_required", "An individual reviewer account is required")
+        queue = access_requests.queue
+        with engine.connect() as connection:
+            rows = connection.execute(select(queue.c.repository_id, queue.c.status)
+                .where(queue.c.handle == principal.handle).order_by(queue.c.updated_at.desc()).limit(50))
+            return [{"repository_id": str(row.repository_id), "status": row.status} for row in rows]
+
+    @app.post("/v1/me/access-requests", status_code=202)
+    def request_viewer_access(body: ViewerRequest, principal: Principal = Depends(authenticate)):
+        if not principal.handle:
+            raise ReadError(403, "account_required", "An individual reviewer account is required")
+        repository_id = int(body.repository_id)
+        if repository_id > 2**63 - 1:
+            raise ReadError(422, "invalid_request", "Invalid repository ID")
+        if repository_id in principal.roles:
+            raise ReadError(409, "already_assigned", "You already have project access")
+        try:
+            with engine.begin() as connection:
+                access_requests.submit(connection, principal.handle, repository_id, projects.get(repository_id))
+        except ValueError as exc:
+            raise ReadError(409, "request_unavailable", str(exc)) from None
+        return {"status": "pending"}
 
     @app.get("/v1/me")
     def account(principal: Principal = Depends(authenticate)) -> AccountSummary:

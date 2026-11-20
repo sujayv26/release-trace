@@ -12,6 +12,8 @@
 
 The tracker stores accounts in a private Vercel Blob store. Existing workspace owners enroll at their next sign-in. GitHub App sign-in, when configured, uses GitHub's repository permissions. The invite-only release review API controls evaluation evidence and approvals. [Tracker configuration](docs/LIVE_PILOT.md#deploy-the-live-tracker)
 
+In the invite-only reviewer dashboard, open **Request project access**, enter the repository ID your operator shared, and check the decision under **Your recent requests**. An approved viewer can then open the project's release history. [Operator instructions](docs/OPERATIONS.md#review-project-access-requests)
+
 ### Run the tracker browser tests
 
 To test the tracker locally, run `npm ci` and `npm run build` in `dashboard/`.

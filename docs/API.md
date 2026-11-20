@@ -10,6 +10,8 @@ The FastAPI service exposes JSON endpoints and interactive API docs at `/docs` i
 
 | Method and path | Contract |
 |---|---|
+| `GET /v1/me/access-requests` | Returns the individual reviewer's latest 50 requests with repository ID and decision. |
+| `POST /v1/me/access-requests` | Takes a decimal-string `repository_id`. Returns 202 for new or already-pending requests without disclosing whether a project exists. One reviewer may have ten pending requests. Shared demo credentials cannot submit requests. |
 | POST /webhooks/github | Verify the raw-body signature and installation scope, persist by delivery ID, return 202 |
 | POST /v1/sessions | Exchange an access key for a one-hour browser session. |
 | DELETE /v1/sessions/current | Revoke the presented browser session and return 204. |

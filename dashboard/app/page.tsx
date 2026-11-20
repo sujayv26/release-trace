@@ -45,7 +45,8 @@ export default async function History({ searchParams }: {
   try {
     account = await readApi<Account>('/v1/me', token);
     if (account.projects.length === 0) {
-      return <><h1>Release history</h1><p className="panel">Your account has no project access.</p></>;
+      return <><h1>Release history</h1><p className="panel">Your account has no project access.</p>
+        {account.handle && <Link href="/access">Request project access</Link>}</>;
     }
     selected = project === undefined ? account.projects[0] : account.projects.find(item => item.id === project);
     if (!selected) {
@@ -99,6 +100,7 @@ export default async function History({ searchParams }: {
         </details>
       </div>
       <nav aria-label="Run pages" className="page-links">
+        {account.handle && <Link href="/access">Manage access requests</Link>}
         {after && <Link href={{ pathname: '/', query: projectQuery }}>First page</Link>}
         {page.next_cursor && <Link href={{ pathname: '/', query: { ...projectQuery, after: page.next_cursor } }}>Next page</Link>}
       </nav>

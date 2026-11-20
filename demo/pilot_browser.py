@@ -1,6 +1,7 @@
 """Exercise production dashboard sessions in disposable Chromium contexts."""
 
 import os
+import json
 import re
 from time import time
 
@@ -117,7 +118,19 @@ def exercise_browser(compose, dashboard_url, api, alpha_key, beta_key, beta_repo
 
             compose(*account, "revoke", "beta", str(beta_repository))
             require(beta.reload().status == 404, "Browser retained revoked project access")
-            compose(*account, "grant", "beta", str(beta_repository), "viewer")
+            beta.goto("/")
+            beta.get_by_role("link", name="Request project access").click()
+            beta.get_by_label("Repository ID").fill(str(beta_repository))
+            beta.get_by_role("button", name="Request access").click()
+            beta.get_by_text(f"Repository {beta_repository} · pending", exact=True).wait_for()
+            requests_cli = ("exec", "-T", "api", "python", "-m", "service.access_requests")
+            pending = json.loads(compose(*requests_cli, "list", capture=True))
+            request = next(row for row in pending if row["handle"] == "beta" and row["repository_id"] == beta_repository)
+            compose(*requests_cli, "approve", request["id"], "--operator", "pilot-operator")
+            check_cache(beta.reload())
+            beta.get_by_text(f"Repository {beta_repository} · approved", exact=True).wait_for()
+            beta.get_by_role("link", name="Release history", exact=True).click()
+            beta.get_by_text(re.compile(r"beta · viewer")).wait_for()
             rotated_key = compose(*account, "rotate", "beta", capture=True).strip()
             beta.goto("/")
             beta.get_by_label("Access key").wait_for()

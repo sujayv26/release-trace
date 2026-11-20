@@ -4,6 +4,25 @@ import { redirect } from 'next/navigation';
 import { readApi, ReleaseApiError } from '../lib/releases';
 import { beginBrowserSession, endBrowserSession, sessionToken } from '../lib/session';
 
+export async function requestViewerAccess(form:FormData) {
+  if (process.env.RELEASETRACE_LIVE_TRACKING === '1') redirect('/');
+  const token = await sessionToken();
+  if (!token) redirect('/');
+  const id = String(form.get('repository_id') || '');
+  if (!/^[1-9][0-9]{0,18}$/.test(id)) redirect('/access?notice=invalid');
+  try {
+    await readApi('/v1/me/access-requests',token,{repository_id:id});
+  } catch (error) {
+    if (error instanceof ReleaseApiError) {
+      if (error.status===401) redirect('/');
+      if (error.status===422) redirect('/access?notice=invalid');
+      if (error.status===409) redirect('/access?notice=conflict');
+    }
+    redirect('/access?notice=unavailable');
+  }
+  redirect('/access?notice=pending');
+}
+
 export async function signIn(form: FormData) {
   const token = form.get('token');
   if (typeof token !== 'string' || !/^[!-~]{1,512}$/.test(token)) redirect('/?access=invalid');
