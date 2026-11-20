@@ -119,6 +119,11 @@ def recover(compose, api_url, secret, alpha, target):
     compose("kill", "-s", "SIGKILL", "worker")
     pending = alpha.get(path).raise_for_status().json()
     require(pending["state"] == "queued" and pending["report"] is None, "The worker completed before interruption")
+    sleep(1.1)
+    monitor = ("exec", "-T", "api", "python", "-m", "service.queue_health", "--max-age-seconds", "1")
+    alert = json.loads(compose(*monitor, capture=True, expected_status=1))
+    require(alert["status"] == "stalled" and alert["stalled_count"] == 1,
+            "Expected a stalled evaluation alert while the worker was stopped")
     queue(api_url, secret, "alpha", delivery, expected="duplicate")
     compose("start", "worker")
     run = wait_for_report(alpha, path)
@@ -129,7 +134,10 @@ def recover(compose, api_url, secret, alpha, target):
             "Expected an interrupted baseline request and a successful reevaluation of both builds")
     history = alpha.get(f"/v1/projects/{PROJECTS['alpha'][0]}/runs").raise_for_status().json()["items"]
     require(sum(item["id"] == delivery for item in history) == 1, "Recovery produced duplicate runs")
+    healthy = json.loads(compose(*monitor, capture=True))
+    require(healthy["status"] == "healthy", "Queue alert did not clear after recovery")
     return path, {"delivery": delivery, "state_after_kill": pending["state"], "redelivery": "duplicate",
+                  "queue_alert": alert, "queue_after_recovery": healthy,
                   "logical_results": 1, "verdict": run["report"]["verdict"], "baseline_requests": 2,
                   "candidate_requests": 1, "detected_seconds": round(detected - start, 3),
                   "recovered_after_detection_seconds": round(monotonic() - detected, 3)}
@@ -224,11 +232,13 @@ def main():
                "RELEASETRACE_DASHBOARD_PORT": "0"}
         base = ("docker", "compose", "-p", project_name, "-f", "compose.yaml", "-f", "compose.pilot.yaml")
 
-        def compose(*command, capture=False, check=True, **streams):
+        def compose(*command, capture=False, check=True, expected_status=0, **streams):
             print(subprocess.list2cmdline([*base, *command]), flush=True)
             if capture:
                 streams["stdout"] = subprocess.PIPE
-            result = subprocess.run([*base, *command], env=env, check=check, **streams)
+            result = subprocess.run([*base, *command], env=env, **streams)
+            if check and result.returncode != expected_status:
+                raise subprocess.CalledProcessError(result.returncode, result.args, output=result.stdout)
             return result.stdout.decode() if capture else None
 
         try:
