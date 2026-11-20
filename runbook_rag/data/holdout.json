@@ -1,0 +1,15 @@
+[
+  {"id":"undo-checkout","group":"paraphrase","question":"How do I undo a checkout rollout?","citation":"checkout-rollback-v2"},
+  {"id":"revert-checkout","group":"paraphrase","question":"Revert the last checkout deploy","citation":"checkout-rollback-v2"},
+  {"id":"job-pile","group":"paraphrase","question":"Background tasks piling up in the queue","citation":"jobs-queue-v1"},
+  {"id":"spreadsheet","group":"paraphrase","question":"Dashboard spreadsheet download stuck","citation":"dashboard-export-v1"},
+  {"id":"change-toggle","group":"lookalike","question":"How do I change the checkout feature toggle before traffic exposure?","citation":"checkout-feature-flag-v1"},
+  {"id":"release-signoff","group":"lookalike","question":"Where do I post health checks for release lead signoff?","citation":"release-approval-v1"},
+  {"id":"refund-ledger","group":"lookalike","question":"For delayed payments refund reconciliation, which ledger and settlement reports should I compare?","citation":"payments-refunds-v1"},
+  {"id":"rollback-authorization","group":"superseded","question":"For checkout deployment rollback should I get approval before restoring the stable revision?","citation":"checkout-rollback-v2"},
+  {"id":"rollback-current","group":"superseded","question":"What does the current checkout deployment rollback say about traffic promotion?","citation":"checkout-rollback-v2"},
+  {"id":"vacation","group":"unanswerable","question":"Can I request vacation next February?","citation":null},
+  {"id":"rollback-salary","group":"unanswerable","question":"What is the checkout deployment rollback team salary and bonus schedule?","citation":null},
+  {"id":"csv-encryption","group":"unanswerable","question":"Is dashboard CSV export encryption AES-256, and which keys rotate monthly?","citation":null},
+  {"id":"credit-expiry","group":"unanswerable","question":"When do travel credits expire for unused employee vouchers?","citation":null}
+]

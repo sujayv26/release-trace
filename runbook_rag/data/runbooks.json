@@ -1,0 +1,44 @@
+[
+  {
+    "id": "checkout-rollback-v1",
+    "title": "Checkout deployment rollback",
+    "status": "superseded",
+    "excerpt": "For a checkout deployment rollback, redeploy the last stable version immediately."
+  },
+  {
+    "id": "checkout-rollback-v2",
+    "title": "Checkout deployment rollback",
+    "status": "active",
+    "excerpt": "For a checkout deployment rollback, pause traffic promotion and get release-lead approval before restoring the last stable revision."
+  },
+  {
+    "id": "payments-refunds-v1",
+    "title": "Payments refund reconciliation",
+    "status": "active",
+    "excerpt": "If payments refund reconciliation is delayed, compare the processor settlement report with the ledger before creating a reconciliation ticket."
+  },
+  {
+    "id": "jobs-queue-v1",
+    "title": "Background job queue backlog",
+    "status": "active",
+    "excerpt": "When the background job queue backlog grows, inspect the oldest pending job and worker health before increasing worker concurrency."
+  },
+  {
+    "id": "dashboard-export-v1",
+    "title": "Dashboard CSV export delay",
+    "status": "active",
+    "excerpt": "For a stalled dashboard CSV export, check the export worker and confirm the requested report window before retrying the export."
+  },
+  {
+    "id": "checkout-feature-flag-v1",
+    "title": "Checkout feature flag change",
+    "status": "active",
+    "excerpt": "For a checkout feature flag change, record the flag key and approved scope in the release ticket before changing traffic exposure."
+  },
+  {
+    "id": "release-approval-v1",
+    "title": "Release lead approval",
+    "status": "active",
+    "excerpt": "For release lead approval, post the deployment summary and current health checks in the release channel and wait for acknowledgement."
+  }
+]

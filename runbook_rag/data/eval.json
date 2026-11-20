@@ -1,0 +1,10 @@
+[
+  {"id": "rollback", "question": "What is the checkout deployment rollback procedure?", "citation": "checkout-rollback-v2", "forbidden": ["checkout-rollback-v1"]},
+  {"id": "refund", "question": "What should I do if refund reconciliation is delayed?", "citation": "payments-refunds-v1"},
+  {"id": "queue", "question": "What should I inspect when the job queue backlog grows?", "citation": "jobs-queue-v1"},
+  {"id": "export", "question": "How do I handle a stalled dashboard CSV export?", "citation": "dashboard-export-v1"},
+  {"id": "flag", "question": "What do I record for a checkout feature flag change?", "citation": "checkout-feature-flag-v1"},
+  {"id": "approval", "question": "Where do I post the summary for release lead approval?", "citation": "release-approval-v1"},
+  {"id": "no-evidence", "question": "Where is the satellite office cafeteria?", "citation": null},
+  {"id": "shared-term", "question": "What are the checkout cafeteria lunch prices?", "citation": null}
+]
