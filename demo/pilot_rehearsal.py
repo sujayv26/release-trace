@@ -6,7 +6,9 @@ import os
 import re
 import ssl
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
+from math import ceil
 from pathlib import Path
 from secrets import token_hex
 from tempfile import TemporaryDirectory
@@ -83,6 +85,25 @@ def inspect_project(client, project, delivery):
             == [(case, citation, project == "alpha")], f"Incorrect case selection for {project}")
     return {"repository_id": repository, "delivery": delivery, "verdict": report["verdict"], "case": case,
             **{field: report[field] for field in ("suite_revision", "policy_revision", "dataset_digest", "policy_digest")}}
+
+
+def measure_burst(api_url, secret, alpha, beta):
+    clients = {"alpha": alpha, "beta": beta}
+    jobs = [(project, f"burst-{project}-{index:02}") for index in range(10) for project in clients]
+    with ThreadPoolExecutor(max_workers=8) as senders:
+        pending = [senders.submit(queue, api_url, secret, project, delivery) for project, delivery in jobs]
+        for future in pending:
+            future.result()
+    samples = []
+    for project, delivery in jobs:
+        report = wait_for_report(clients[project], f"/v1/runs/{delivery}")["report"]
+        require(report["verdict"] == "pass", "Burst evaluation did not pass")
+        samples.append(report["timings"])
+    rank = ceil(len(samples) * 0.95) - 1
+    return {"suites": len(samples), "projects": 2, "concurrent_senders": 8, "workers": 1,
+            "cases_per_suite": 1, "requests_per_suite": 2, "percentile": "nearest rank",
+            **{f"p95_{field}": sorted(row[field] for row in samples)[rank]
+               for field in ("queue_wait_ms", "evaluation_ms")}}
 
 
 def verify_denial(compose, directory, secret, alpha, beta, target):
@@ -165,8 +186,10 @@ def record_and_restore(compose, directory, path, alpha, key):
         compose(*db, "pg_dump", "-U", "releasetrace", "-Fc", "releasetrace", stdout=backup)
         compose(*db, "createdb", "-U", "releasetrace", "releasetrace_restored")
         backup.seek(0)
+        restore_started = monotonic()
         compose(*db, "pg_restore", "-U", "releasetrace", "--exit-on-error", "--single-transaction", "-d",
                 "releasetrace_restored", stdin=backup)
+        restore_seconds = round(monotonic() - restore_started, 3)
     cleared = compose("run", "--rm", "-T", "--no-deps", "restore-api", "python", "-m",
                       "service.authentication", "clear-sessions", "--confirm", capture=True)
     require(any(re.fullmatch(r"Cleared [1-9][0-9]* browser sessions\.", line) for line in cleared.splitlines()),
@@ -188,7 +211,8 @@ def record_and_restore(compose, directory, path, alpha, key):
     require(source_audit and restored_audit == source_audit, "Restore returned different access history")
     return {"approval": approval, "rollout_observation": deployment, "observation_source": "synthetic fixture",
             "restore_database": "releasetrace_restored", "api_run_and_cases_match": True,
-            "restored_access_events": len(restored_audit), "restored_session_status": 401}
+            "restored_access_events": len(restored_audit), "restored_session_status": 401,
+            "pg_restore_seconds": restore_seconds}
 
 
 def exercise(compose, directory, secret, *, browser=False):
@@ -207,6 +231,7 @@ def exercise(compose, directory, secret, *, browser=False):
             queue(api_url, secret, project, f"pilot-{project}")
         projects = [inspect_project(client, project, f"pilot-{project}")
                     for client, project in ((alpha, "alpha"), (beta, "beta"))]
+        burst = measure_burst(api_url, secret, alpha, beta)
         cross_reads = [alpha.get("/v1/runs/pilot-beta").status_code, beta.get("/v1/runs/pilot-alpha").status_code]
         require(cross_reads == [404, 404], "Cross-project read did not fail closed")
         api_url, denial = verify_denial(compose, directory / "projects", secret, alpha, beta, target)
@@ -223,7 +248,8 @@ def exercise(compose, directory, secret, *, browser=False):
         path, recovery = recover(compose, api_url, secret, alpha, target)
         restored = record_and_restore(compose, directory, path, alpha, alpha_key)
     return {"projects": projects, "cross_project_statuses": cross_reads, "revoked_key_status": revoked_status,
-            "destination_denial": denial, "recovery": recovery, "restored": restored, "browser": browser_evidence}
+            "destination_denial": denial, "recovery": recovery, "restored": restored, "browser": browser_evidence,
+            "burst": burst}
 
 
 def main():
