@@ -107,6 +107,17 @@ account_access_events = Table(
     Index("ix_account_access_events_handle", "handle", "id"),
     Index("ix_account_access_events_repository", "repository_id", "id"),
 )
+access_requests = Table(
+    "access_requests", metadata,
+    Column("handle", ForeignKey("accounts.handle"), primary_key=True),
+    Column("repository_id", BigInteger, primary_key=True),
+    Column("id", String(36), unique=True, nullable=False),
+    Column("installation_id", BigInteger),
+    Column("organization", String(63)),
+    Column("status", String(8), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    Index("ix_access_requests_queue", "status", "updated_at"),
+)
 
 
 def database():

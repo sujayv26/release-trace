@@ -15,6 +15,7 @@ source files fit into each subsystem.
 | `service/api.py` | HTTP routes, project-scoped evidence queries, and digest-bound approval checks |
 | `service/authentication.py`, `service/accounts.py`, `service/projects.py` | Key and session validation, current grant resolution, credential administration, and project directory validation |
 | `service/store.py`, `service/migrations` | Database access, persistent state, and schema changes |
+| `dashboard/app/access`, `service/access_requests.py` | Reviewer access requests, operator decisions and transactional viewer grants |
 | `service/worker.py`, `service/temporal_worker.py` | Background evaluation, investigation, and Check publication |
 | `service/evaluate_builds.py`, `service/evaluation_config.py` | Application evaluation and versioned project suites |
 | `service/investigation_graph.py`, `service/github_check.py` | Controlled diagnostic reruns and formatting GitHub Checks |

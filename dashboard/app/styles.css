@@ -12,6 +12,17 @@
 body { margin: 0; background: var(--canvas); color: var(--ink); font: 1rem/1.55 system-ui, sans-serif; }
 a { color: var(--accent); text-underline-offset: .2em; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.repo-picker { display: flex; flex-wrap: wrap; align-items: center; gap: .7rem; }
+.repo-picker label { font-weight: 700; }
+.repo-picker input { flex: 1 1 16rem; min-width: 10rem; border: 1px solid #8992aa; border-radius: .5rem; padding: .6rem; }
+.repo-picker .primary { margin: 0; }
+.tracker-section { margin-block: 1.2rem; }
+.tracker-metrics { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,14rem),1fr)); gap: .8rem; }
+.tracker-metrics .panel { border-top: 4px solid #6953bd; }
+.tracker-metrics .metric { color: #392486; font-size: 1.8rem; font-weight: 750; overflow-wrap: anywhere; }
+.tracked-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .7rem; padding: .55rem 0; }
+.workspace-key { display: block; width: fit-content; background: #f2edff; border-radius: .4rem; padding: .65rem; }
+#workspace form + form { margin-top: .85rem; }
 h1, h2, h3 { line-height: 1.2; }
 h1 { margin: .45em 0 .25em; font-size: clamp(2rem, 4vw, 2.85rem); letter-spacing: -.035em; }
 h2 { font-size: 1.25rem; }

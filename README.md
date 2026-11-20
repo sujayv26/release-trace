@@ -2,11 +2,29 @@
 
 **Catch AI regressions before they reach users.** ReleaseTrace asks the current and proposed versions of an AI application the same questions, blocks releases that fail critical checks, and shows reviewers the evidence behind the decision.
 
-[Open the public demo](https://releasetrace-demo.vercel.app/) · [Run locally](#run-the-local-demo) · [Review the results](#verification-and-rollout-evidence) · [System architecture](docs/ARCHITECTURE.md) · [File and folder diagrams](docs/CODE_MAP.md)
+[Open the live tracker](https://releasetrace-demo.vercel.app/) · [Try the synthetic walkthrough](https://releasetrace-checkout-demo.excellentplover16.chatgpt.site/) · [Run locally](#run-the-local-demo) · [System architecture](docs/ARCHITECTURE.md) · [File and folder diagrams](docs/CODE_MAP.md)
+
+## Track your repository
+
+1. Select **Create free workspace** and save your workspace key. Add the setup key to your authenticator app, enter the six-digit code, and select **Verify and open workspace**. On another device, sign in with the workspace key and a fresh code.
+2. Enter a public GitHub repository URL or `owner/repository` and select **Track repository**. The workspace saves up to 12 repositories. Select one to review or refresh it.
+3. Inspect published release tags, workflow success and elapsed p95 for the latest 25 default-branch runs, and any ReleaseTrace Check on the current commit. Each workflow links to the original GitHub record. An empty gate means no matching evaluation was reported. Tracking a repository does not configure or execute an AI evaluation.
+
+The tracker stores accounts in a private Vercel Blob store. Existing workspace owners enroll at their next sign-in. GitHub App sign-in, when configured, uses GitHub's repository permissions. The invite-only release review API controls evaluation evidence and approvals. [Tracker configuration](docs/LIVE_PILOT.md#deploy-the-live-tracker)
+
+In the invite-only reviewer dashboard, open **Request project access**, enter the repository ID your operator shared, and check the decision under **Your recent requests**. An approved viewer can then open the project's release history. [Operator instructions](docs/OPERATIONS.md#review-project-access-requests)
+
+### Run the tracker browser tests
+
+To test the tracker locally, run `npm ci` and `npm run build` in `dashboard/`.
+Open **Testing** in VS Code and run the Playwright dashboard tests, or run
+`npx playwright test` from that directory. The suite uses local GitHub fixtures.
+Windows uses installed Edge. On Linux or macOS, install the test browser with
+`npx playwright install chromium`.
 
 ## Two-minute public walkthrough
 
-1. Open the public demo in a private browser window and select **Blocked candidate**. The synthetic checkout assistant has one critical case about rolling back a deployment.
+1. Open the [synthetic walkthrough](https://releasetrace-checkout-demo.excellentplover16.chatgpt.site/) in a private browser window and select **Blocked candidate**. The synthetic checkout assistant has one critical case about rolling back a deployment.
 2. Compare the excerpts. The stable build cites `checkout-rollback-v2`, which requires release-lead approval. The proposed build cites `checkout-rollback-v1` and recommends an immediate rollback.
 3. Select **Open corrected passing run**. Both builds now cite v2. Expand **What did the gate measure?** to see what the passing verdict covers.
 

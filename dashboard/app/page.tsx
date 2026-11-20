@@ -4,6 +4,7 @@ import { Status } from './components';
 import { RunHistory } from './run-history';
 import { type Account, historyPath, type Page, readApi, ReleaseApiError, type Run } from '../lib/releases';
 import { sessionToken } from '../lib/session';
+import { Tracker } from './tracker';
 
 function AccessForm({ error }: { error?: string }) {
   return (
@@ -32,7 +33,9 @@ function AccessForm({ error }: { error?: string }) {
 export default async function History({ searchParams }: {
   searchParams: Promise<{ after?: string; access?: string; project?: string | string[] }>;
 }) {
-  const { after, access, project } = await searchParams;
+  const query = await searchParams;
+  if (process.env.RELEASETRACE_LIVE_TRACKING === '1') return <Tracker query={query} />;
+  const { after, access, project } = query;
   const token = await sessionToken();
   if (!token) return <AccessForm error={access} />;
 
@@ -42,7 +45,8 @@ export default async function History({ searchParams }: {
   try {
     account = await readApi<Account>('/v1/me', token);
     if (account.projects.length === 0) {
-      return <><h1>Release history</h1><p className="panel">Your account has no project access.</p></>;
+      return <><h1>Release history</h1><p className="panel">Your account has no project access.</p>
+        {account.handle && <Link href="/access">Request project access</Link>}</>;
     }
     selected = project === undefined ? account.projects[0] : account.projects.find(item => item.id === project);
     if (!selected) {
@@ -96,6 +100,7 @@ export default async function History({ searchParams }: {
         </details>
       </div>
       <nav aria-label="Run pages" className="page-links">
+        {account.handle && <Link href="/access">Manage access requests</Link>}
         {after && <Link href={{ pathname: '/', query: projectQuery }}>First page</Link>}
         {page.next_cursor && <Link href={{ pathname: '/', query: { ...projectQuery, after: page.next_cursor } }}>Next page</Link>}
       </nav>

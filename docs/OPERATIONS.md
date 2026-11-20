@@ -545,3 +545,17 @@ method records a diagnosis only when the controlled rerun establishes it.
 The JSON report includes the returned model ID, token counts, elapsed time
 and per-case reasons. A failed provider request exits with an error so it
 doesn't count as an abstention.
+## Review project access requests
+
+An individually provisioned reviewer opens **Request project access** (or **Manage access requests** from release history) on the private dashboard and enters the numeric repository ID supplied by the operator. They can refresh the request page to see the decision. Personal tracker accounts on Vercel have a separate sign-in.
+
+After applying `python -m service.store`, use the private service environment with its configured database and project directory:
+
+```sh
+python -m service.access_requests list
+python -m service.access_requests approve REQUEST_UUID --operator YOUR_HANDLE
+# To decline a pending request
+python -m service.access_requests deny REQUEST_UUID --operator YOUR_HANDLE
+```
+
+Verify the handle, repository, organization and installation before deciding. Approval gives viewer access. Use the existing account CLI for elevated roles or revocation. A changed installation requires a fresh request after denying the stale one. The operator decision is recorded in account access history.

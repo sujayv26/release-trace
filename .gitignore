@@ -4,4 +4,5 @@ dashboard/node_modules/
 dashboard/.next/
 dashboard/next-env.d.ts
 dashboard/*.tsbuildinfo
+dashboard/test-results/
 /.venv/
