@@ -1,5 +1,6 @@
 """Authenticate API keys and manage short-lived browser sessions."""
 
+import argparse
 import hmac
 import re
 from dataclasses import dataclass
@@ -7,10 +8,11 @@ from datetime import datetime, timedelta, timezone
 from secrets import token_urlsafe
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
 from .accounts import ACCESS_KEY, key_hash
 from .projects import Role
-from .store import accounts, browser_sessions, project_memberships
+from .store import accounts, browser_sessions, database, project_memberships
 
 SESSION_TOKEN = re.compile(r"rts_[A-Za-z0-9_-]{43}")
 SESSION_TTL_SECONDS = 60 * 60
@@ -36,6 +38,7 @@ class Authentication:
 
     def _principal(self, connection, credential_hash):
         if self.managed:
+            # Resolve live grants on each request so a session never preserves a revoked role.
             rows = connection.execute(select(
                 accounts.c.handle, project_memberships.c.repository_id, project_memberships.c.installation_id,
                 project_memberships.c.organization, project_memberships.c.role,
@@ -81,6 +84,8 @@ class Authentication:
                 return None
             connection.execute(browser_sessions.delete().where(browser_sessions.c.expires_at <= now))
             token = "rts_" + token_urlsafe(32)
+            # Tie the token to the issuing key fingerprint so rotation or disablement
+            # invalidates sessions immediately without carrying project grants in the token.
             connection.execute(browser_sessions.insert().values(
                 token_hash=key_hash(token), credential_hash=credential_hash,
                 expires_at=now + timedelta(seconds=SESSION_TTL_SECONDS),
@@ -91,3 +96,25 @@ class Authentication:
         if SESSION_TOKEN.fullmatch(token):
             with self.engine.begin() as connection:
                 connection.execute(browser_sessions.delete().where(browser_sessions.c.token_hash == key_hash(token)))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Invalidate browser sessions in the configured ReleaseTrace database.")
+    parser.add_argument("action", choices=["clear-sessions"])
+    parser.add_argument("--confirm", action="store_true", help="Confirm all browsers using this database must sign in again")
+    if not parser.parse_args().confirm:
+        parser.error("Confirm the intended database with --confirm before invalidating sessions")
+    try:
+        engine = database()
+        try:
+            with engine.begin() as connection:
+                deleted = connection.execute(browser_sessions.delete()).rowcount
+        finally:
+            engine.dispose()
+    except (KeyError, SQLAlchemyError):
+        parser.exit(1, "Could not clear browser sessions. Check the database and migration.\n")
+    print(f"Cleared {deleted} browser sessions.")
+
+
+if __name__ == "__main__":
+    main()

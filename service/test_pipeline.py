@@ -104,10 +104,14 @@ class PipelineTest(unittest.TestCase):
                     self.assertEqual(client.get("/v1/me", headers=logout).status_code, 401)
                     expired = sign_in(alice)
                     with engine.begin() as connection:
-                        hashes = connection.execute(browser_sessions.select()).mappings().all()
-                        self.assertTrue(all(row["token_hash"] not in expired["Authorization"] for row in hashes))
+                        session_hash = manage_accounts.key_hash(expired["Authorization"].split()[1])
+                        row = connection.execute(browser_sessions.select().where(
+                            browser_sessions.c.token_hash == session_hash,
+                        )).mappings().one()
+                        self.assertEqual(row["credential_hash"],
+                                         manage_accounts.key_hash(alice["Authorization"].split()[1]))
                         connection.execute(browser_sessions.update().where(
-                            browser_sessions.c.token_hash == manage_accounts.key_hash(expired["Authorization"].split()[1]),
+                            browser_sessions.c.token_hash == session_hash,
                         ).values(expires_at=datetime.now(timezone.utc) - timedelta(seconds=1)))
                     self.assertEqual(client.get("/v1/me", headers=expired).status_code, 401)
                     self.assertEqual(push(51, 62, "a" * 40, "forged-scope").status_code, 403)
