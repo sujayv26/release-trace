@@ -2,9 +2,17 @@
 
 **Catch AI regressions before they reach users.** ReleaseTrace asks the current and proposed versions of an AI application the same questions, blocks releases that fail critical checks, and shows reviewers the evidence behind the decision.
 
-[Try the demo](#run-the-local-demo) · [See what happens](#follow-a-release) · [Review the results](#verification-and-rollout-evidence) · [System architecture](docs/ARCHITECTURE.md) · [File and folder diagrams](docs/CODE_MAP.md)
+[Open the public demo](https://releasetrace-demo.vercel.app/) · [Run locally](#run-the-local-demo) · [Review the results](#verification-and-rollout-evidence) · [System architecture](docs/ARCHITECTURE.md) · [File and folder diagrams](docs/CODE_MAP.md)
 
-> **The demo in one line:** The proposed version answers four out of five questions correctly. Its fifth answer cites an outdated account-closure policy, so ReleaseTrace blocks the release.
+## Two-minute public walkthrough
+
+1. Open the public demo in a private browser window and select **Blocked candidate**. The synthetic checkout assistant has one critical case about rolling back a deployment.
+2. Compare the excerpts. The stable build cites `checkout-rollback-v2`, which requires release-lead approval. The proposed build cites `checkout-rollback-v1` and recommends an immediate rollback.
+3. Select **Open corrected passing run**. Both builds now cite v2. Expand **What did the gate measure?** to see what the passing verdict covers.
+
+The walkthrough serves four static files with synthetic records. Invited reviewers use a separate authenticated dashboard for real evaluations and approvals. The eight-case archive benchmark shows where citation checks miss incorrect answers. [Benchmark and pilot operator guide](docs/LIVE_PILOT.md)
+
+The local support-policy demo covers five cases. Its candidate passes four citation checks and fails the critical account-closure case.
 
 ## Follow a release
 
@@ -88,6 +96,15 @@ python -m unittest discover -s demo -v
 ```
 
 For a real HTTP citation example, the companion **Runbook RAG** application answers from versioned runbooks. CI builds three revisions from distinct commits and evaluates them by OCI digest. [Runbook benchmark and reproduction steps](docs/PILOT.md#evaluate-runbook-rag)
+
+### Use your own runbooks
+
+Mount a versioned JSON corpus and set \`RUNBOOK_CORPUS_FILE\`. The service
+indexes active passages on startup. It returns verbatim evidence and citations
+through \`/ask\`, and preserves the ReleaseTrace \`/evaluate\` contract. The
+default embedded fixture still runs without credentials. Operators can opt in
+to OpenAI embeddings and model-assisted quote selection.
+[Corpus format, configuration, and operating limits](docs/PILOT.md#use-your-own-runbook-corpus)
 
 ## Verification and rollout evidence
 

@@ -7,7 +7,7 @@ and OpenSSL 1.1.1 or later on `PATH`. Run these commands from a terminal with
 access to Docker. The rehearsal uses only synthetic data.
 
 ```bash
-git clone --branch develop --single-branch https://github.com/sujayv26/release-trace.git release-trace-pilot
+git clone --branch main --single-branch https://github.com/sujayv26/release-trace.git release-trace-pilot
 cd release-trace-pilot
 python -m pip install -r service/requirements.txt
 python -m demo.pilot_rehearsal --evidence pilot-evidence.json
@@ -67,9 +67,9 @@ verification, and measured hosted canary outcomes.
 
 ## Prepare the hosted environment
 
-The [Render Blueprint](../render.yaml) defines a dashboard and an API with HTTPS ingress, a background worker, and PostgreSQL on the private network. It uses the `develop` branch and disables automatic service deploys. PostgreSQL has no public IP allowlist entries. The dashboard talks to the API over the private network. Reviewers authenticate with managed account keys. GitHub pushes require the webhook signature and a configured repository and installation.
+The [Render Blueprint](../render.yaml) defines a dashboard and an API with HTTPS ingress, a background worker, and PostgreSQL on the private network. It uses the `main` branch and disables automatic service deploys. PostgreSQL has no public IP allowlist entries. The dashboard talks to the API over the private network. Reviewers authenticate with managed account keys. GitHub pushes require the webhook signature and a configured repository and installation.
 
-Provision only in an approved pilot workspace. In Render, select the `develop` branch when creating the Blueprint. The API runs the database migration before deployment. Add `projects.json` and any referenced build target and evaluation files as API secret files under `/etc/secrets`. The API requires that configuration at startup. Verify the API's `/readyz` check before testing the dashboard or worker. Use synthetic data until the deployment and access checks have passed. [Managed project configuration](OPERATIONS.md#configure-managed-projects-and-reviewer-accounts)
+Provision only in an approved pilot workspace. In Render, select the `main` branch when creating the Blueprint. The API runs the database migration before deployment. Add `projects.json` and any referenced build target and evaluation files as API secret files under `/etc/secrets`. The API requires that configuration at startup. Verify the API's `/readyz` check before testing the dashboard or worker. Use synthetic data until the deployment and access checks have passed. [Managed project configuration](OPERATIONS.md#configure-managed-projects-and-reviewer-accounts)
 
 Set `RELEASETRACE_APPROVED_EVALUATION_URLS` on the worker. Keys are repository IDs and each value maps a variant to the exact approved HTTPS URL.
 
@@ -178,6 +178,61 @@ They contain commit and image identity, effective index revision, corpus hash,
 cited document version, retrieval and validation durations, optional reranking
 duration, and an abstention reason. Keep questions, excerpts, and bearer tokens
 out of the verification record.
+
+### Use your own runbook corpus
+
+Provide a UTF-8 JSON array of section-sized passages, with stable versioned IDs.
+
+\`\`\`json
+[
+  {
+    "id": "checkout/rollback-v2",
+    "title": "Checkout deployment rollback",
+    "status": "active",
+    "excerpt": "Pause traffic promotion and obtain release-lead approval before rollback."
+  }
+]
+\`\`\`
+
+Set \`RUNBOOK_CORPUS_FILE\` to the path visible to the service. For a release
+image, also set \`RUNBOOK_CORPUS_SHA256\` to the SHA-256 of the exact file bytes.
+Keep the corpus read-only in the deployment and restart with a new fingerprint
+when it changes. Stable and candidate revisions can pin different corpora.
+The service accepts one to 512 passages, up to 3,000 characters per excerpt and
+2 MB total. It excludes superseded passages from both retrieval indexes.
+Keep separate corpora in separate deployments with independent bearer tokens.
+
+The default hybrid mode runs offline. To opt in to dense retrieval and
+model-assisted quote selection, supply \`OPENAI_API_KEY\` through the deployment's
+secret mechanism and set \`RUNBOOK_OPENAI_EMBEDDING_MODEL\` and
+\`RUNBOOK_OPENAI_ANSWER_MODEL\` to available embedding and structured-output
+models. Document passages are embedded at startup. Requests send the question
+and shortlisted passages to OpenAI in this mode, so enable it only for data
+approved for that provider. The optional \`RUNBOOK_OPENAI_MIN_SIMILARITY\`
+defaults to 0.45 and should be calibrated against the project's evaluation suite.
+The bounded corpus is scanned in memory for dense search. Size the service based
+on measured startup time and concurrency before using a larger workload.
+
+The API joins at most two verbatim quotes from retrieved passages. It validates
+the passage IDs and quotes before returning them and uses the first citation
+in the existing ReleaseTrace evaluation response. An explicit model abstention
+returns insufficient evidence. If a request to the provider fails or returns
+invalid evidence, the service falls back to local retrieval and records which
+stage failed. Startup fails if the configured embedding index cannot be built.
+Verbatim validation proves source attribution. Use a held-out evaluation to
+check whether the selected evidence actually answers each question.
+
+Run locally from the repository root after installing
+\`service/requirements.txt\`:
+
+\`\`\`bash
+python -m uvicorn runbook_rag.api:app
+\`\`\`
+
+Open the API documentation at http://127.0.0.1:8000/docs. Send
+\`{"question":"What is the checkout deployment rollback procedure?"}\` to
+\`POST /ask\` to try the bundled corpus. Release images require their pinned
+commit, image digest, and bearer credentials.
 
 ### Two-minute reviewer walkthrough
 

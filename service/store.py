@@ -2,6 +2,7 @@
 
 import os
 from datetime import datetime, timezone
+from time import monotonic
 
 from sqlalchemy import (
     JSON, BigInteger, Column, DateTime, ForeignKey, Index, Integer, MetaData, String, Table, create_engine, select, update,
@@ -162,6 +163,8 @@ def process_one(engine, delivery_id=None):
         ).values(state="running"))
         if claimed.rowcount != 1:
             return None
+        claimed_at = datetime.now(timezone.utc)
+        started = monotonic()
         inputs = job.inputs
         if inputs.get("evaluation_mode") == "build_endpoints":
             targets = BuildTargets.model_validate(inputs["build_targets"])
@@ -171,6 +174,12 @@ def process_one(engine, delivery_id=None):
             report = evaluate_configured_builds(targets, inputs.get("fixture"), inputs.get("suite"), **options)
         else:
             report = run_suite(inputs["fixture"], inputs["suite"])
+        # A retry measures time to the successful claim, including worker downtime.
+        queued_at = as_utc(job.created_at)
+        report["timings"] = {
+            "queue_wait_ms": round((claimed_at - queued_at).total_seconds() * 1000, 3) if queued_at else None,
+            "evaluation_ms": round((monotonic() - started) * 1000, 3),
+        }
         connection.execute(update(deliveries).where(deliveries.c.id == job.id).values(
             state="completed", report=report, completed_at=datetime.now(timezone.utc),
         ))

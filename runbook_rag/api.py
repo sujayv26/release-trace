@@ -1,4 +1,4 @@
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 from hashlib import sha256
 from hmac import compare_digest
 import json
@@ -12,8 +12,9 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
+from .grounding import GroundedSearch, openai_backend
 from .ranking import DEFAULT_VARIANT, VARIANTS, RunbookSearch
-from .retrieval import Citation, DATA, build_index
+from .retrieval import Citation, DATA, build_index, read_corpus
 
 trace = logging.getLogger("uvicorn.error")
 REVISION = Path(__file__).with_name("release_revision.txt").read_text(encoding="utf-8").strip()
@@ -55,14 +56,30 @@ async def lifespan(app: FastAPI):
     variant = os.getenv("RUNBOOK_RETRIEVAL_VARIANT", DEFAULT_VARIANT)
     if variant not in VARIANTS:
         raise RuntimeError("Unknown runbook retrieval variant")
-    with TemporaryDirectory(prefix="runbook-rag-") as directory:
+    configured_corpus = os.getenv("RUNBOOK_CORPUS_FILE")
+    corpus = Path(configured_corpus) if configured_corpus else DATA / "runbooks.json"
+    if configured_corpus and REVISION == "stale-candidate":
+        raise RuntimeError("The intentional stale fixture requires the bundled corpus")
+    snapshot = read_corpus(corpus)
+    fingerprint = sha256(snapshot).hexdigest()
+    expected = os.getenv("RUNBOOK_CORPUS_SHA256")
+    if (expected and not compare_digest(expected.encode(), fingerprint.encode())
+            or configured_corpus and build and not expected):
+        raise RuntimeError("Runbook release corpus digest does not match its configuration")
+
+    with ExitStack() as stack:
+        directory = stack.enter_context(TemporaryDirectory(prefix="runbook-rag-"))
         database = Path(directory) / "runbooks.db"
-        build_index(database, stale_checkout=REVISION == "stale-candidate")
-        app.state.retrieval = RunbookSearch(database)
+        build_index(database, stale_checkout=REVISION == "stale-candidate", snapshot=snapshot)
+        lexical = RunbookSearch(database)
+        backend = openai_backend(stack, variant)
+        app.state.retrieval = GroundedSearch(lexical, backend) if backend else lexical
         app.state.build = build
         app.state.token = token
         app.state.variant = variant
-        app.state.corpus_digest = sha256((DATA / "runbooks.json").read_bytes()).hexdigest()
+        app.state.models = ({"embedding_model": backend.embedding_model,
+                             "answer_model": backend.answer_model} if backend else {})
+        app.state.corpus_digest = fingerprint
         yield
 
 
@@ -95,6 +112,7 @@ def retrieve(payload, request):
         "event": "runbook_request", "build": state.build, "revision": REVISION,
         "corpus_digest": state.corpus_digest, "variant": state.variant,
         "document_version": citation.id if citation else None,
+        **state.models,
         "failure_reason": None if citation else "insufficient_evidence",
         **timings,
     }))
