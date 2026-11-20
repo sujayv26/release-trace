@@ -1,7 +1,7 @@
 import type { NextConfig } from 'next';
 
 const config: NextConfig = {
-  output: 'standalone',
+  output: process.env.VERCEL ? undefined : 'standalone',
   poweredByHeader: false,
   turbopack: { root: process.cwd() },
   async headers() {
@@ -15,6 +15,9 @@ const config: NextConfig = {
       ],
     }, {
       source: '/',
+      headers: privatePageHeaders,
+    }, {
+      source: '/auth/:path*',
       headers: privatePageHeaders,
     }, {
       source: '/runs/:path*',

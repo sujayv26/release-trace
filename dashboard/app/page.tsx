@@ -4,6 +4,7 @@ import { Status } from './components';
 import { RunHistory } from './run-history';
 import { type Account, historyPath, type Page, readApi, ReleaseApiError, type Run } from '../lib/releases';
 import { sessionToken } from '../lib/session';
+import { Tracker } from './tracker';
 
 function AccessForm({ error }: { error?: string }) {
   return (
@@ -32,7 +33,9 @@ function AccessForm({ error }: { error?: string }) {
 export default async function History({ searchParams }: {
   searchParams: Promise<{ after?: string; access?: string; project?: string | string[] }>;
 }) {
-  const { after, access, project } = await searchParams;
+  const query = await searchParams;
+  if (process.env.RELEASETRACE_LIVE_TRACKING === '1') return <Tracker query={query} />;
+  const { after, access, project } = query;
   const token = await sessionToken();
   if (!token) return <AccessForm error={access} />;
 

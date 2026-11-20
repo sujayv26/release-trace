@@ -2,7 +2,7 @@
 
 ## Publish the walkthrough
 
-The four-file export is live under `sujayv26s-projects/releasetrace-demo`. A fresh mobile-sized Edge context followed history → blocked → corrected with JavaScript disabled on both hosts. The private project read and approval request returned 404 on both. [Vercel production](https://releasetrace-demo.vercel.app/) · [Sites mirror](https://releasetrace-checkout-demo.excellentplover16.chatgpt.site/)
+The four-file synthetic export is available on [Sites](https://releasetrace-checkout-demo.excellentplover16.chatgpt.site/). The main [Vercel URL](https://releasetrace-demo.vercel.app/) serves the live account-based dashboard.
 
 From the ReleaseTrace checkout, run these commands with Python 3.12 and SQLite FTS5. Use a fresh output directory. The builder replays the checked-in checkout question against current and stale retrieval indexes and applies the deterministic gate. It copies the dashboard stylesheet and emits only the history and two evidence pages.
 
@@ -11,9 +11,17 @@ python -m demo.public_site public-export
 python -m http.server --bind 127.0.0.1 --directory public-export 8080
 ```
 
-For Vercel, import ReleaseTrace as a dedicated project, set the root to the repository root, choose the **Other** framework preset, set the build command to `python3 -m demo.public_site public-export`, and set the output directory to `public-export`. Select the production branch, `main`. Leave environment variables empty. Alternatively, deploy the four built files as a static directory using the Vercel CLI from inside the export. Enable anonymous access on the intended production URL. The existing public walkthrough is hosted on Sites. [Vercel build settings](https://vercel.com/docs/builds/configure-a-build)
+To serve the synthetic walkthrough independently, publish the generated four files on a static host.
 
 Install Playwright and select an installed Chromium browser using `RELEASETRACE_TEST_BROWSER_CHANNEL` (CI uses `chrome`). Run `python -m demo.public_browser --url https://YOUR-DEMO-HOST/`. Verify the blocked and corrected citations, the private-project read denial, and the rejected approval POST. This host needs no connection to ReleaseTrace.
+
+## Deploy the live tracker
+
+Deploy `dashboard/` as a Next.js project on Vercel. Its `vercel.json` selects live tracking. The regular Compose dashboard continues to use the existing reviewer API. Attach a **private** Vercel Blob store in Production. Personal workspace keys and one-hour session tokens are random 256-bit credentials. The private store addresses both by hash. Logout deletes the server-side session, and the account retains its repository IDs. Concurrent list changes use ETags. No GitHub credential is used for public-only workspace lookups.
+
+For optional GitHub sign-in, configure a GitHub App with a callback of `https://YOUR-HOST/auth/callback`, read permissions for Actions, Contents and Checks, and installation on selected repositories. Set `RT_GITHUB_CLIENT_ID`, `RT_GITHUB_CLIENT_SECRET`, `RT_GITHUB_APP_SLUG`, `RT_TRACKER_ORIGIN` and a base64-encoded random 32-byte `RT_TRACKER_ENCRYPTION_KEY` in Vercel. The OAuth exchange uses state and PKCE. The server encrypts the GitHub user token before storing it with the short-lived session. Each private read uses the signed-in user's GitHub token. Workspace-key and GitHub identities have independent saved lists.
+
+Run `python -m demo.tracker_browser https://YOUR-HOST/` with Playwright and an installed browser channel to exercise two separate personal workspaces, cross-account isolation, a real repository, logout, and sign-in again. This creates two test workspaces and removes the saved test repository. Keep keys, cookies and browser traces out of artifacts.
 
 ## Connect the controlled GitHub App
 
