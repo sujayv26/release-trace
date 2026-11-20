@@ -32,7 +32,8 @@ record of the rehearsal.
    The command kills the worker while waiting, checks that the delivery is
    queued, redelivers it, and restarts the worker. Expect `duplicate` for
    redelivery and exactly one completed run in history. The interrupted request
-   itself is repeated after restart.
+   itself is repeated after restart. The rehearsal saves the queue monitor's
+   stalled and recovered results with the run evidence.
 4. The alpha approver records a decision on the recovered passing build and
    submits a synthetic `aborted` rollout observation. Both retries must return
    their original records. The command uses `pg_dump` and `pg_restore` to copy
@@ -66,8 +67,18 @@ The worker checks this configuration before making requests or attaching a beare
 
 ## Collect hosted verification evidence
 
+### Two-minute reviewer walkthrough
+
+Open the dashboard URL supplied with your invitation and sign in using your
+individual key. Open your assigned project and select the blocked run. Select
+**Failed cases** and compare the stable and candidate citations for the critical
+case. Open the corrected run and check that it has its own passing verdict,
+evaluated commit, and candidate digest. If you have approval access, record an
+approval against that digest. Sign out when finished.
+
 | Order | Exercise | Evidence to save |
 |---|---|---|
+| 1 | Confirm HTTPS for the dashboard and API, API readiness, and a private PostgreSQL connection from the API and worker. | Dashboard URL, deployed commit, readiness result, migration revision, and timestamp. |
 | 2 | Onboard two test projects with different suites and approved evaluation URLs. Give each reviewer access to one project. Attempt a cross-project read, revoke a test key, and evaluate a candidate URL missing from the approved map. | Two completed run IDs, a cross-project HTTP 404, a revoked-key HTTP 401, and an inconclusive run with `destination_not_approved`. Confirm the denied endpoint received zero requests. |
 | 3 | Install the GitHub App on a demo repository you control. Enable the worker publisher for that managed project and use the live redelivery checklist. | The signed delivery ID, evaluated commit, Check ID, and proof that redelivery preserved both IDs. [Live GitHub verification](OPERATIONS.md#verify-live-github-app-redelivery) |
 | 4 | Publish the candidate image and its build-provenance attestation from the trusted GitHub Actions workflow. Try promotion after the active build pair changes, then exercise healthy and unhealthy canaries for approved builds. | Stale-approval HTTP 409, the verified workflow and source commit, the approved and running digest, and a saved dashboard outcome for each rollout. |
@@ -102,6 +113,15 @@ dashboard outcomes before completing the drill. [GitHub CLI attestation verifica
 
 ### Rehearse recovery and restore
 
+Run `python -m service.queue_health --max-age-seconds 300` from a scheduled
+monitor with private database access and the same `RELEASETRACE_DATABASE_URL`.
+Run it independently of the evaluation worker. Route exit 1 (stalled
+evaluations) and exit 2 (database unavailable) to the operator alert channel.
+The command reports an aggregate count and avoids exposing run payloads or
+credentials. During the interruption drill, record the alert delivery and
+verify the next probe exits 0 after the worker clears the queue. Choose a
+threshold above the normal end-to-end evaluation time for your largest suite.
+
 1. Queue a test release and record its delivery ID and queue time. Stop the
    evaluation worker during processing in the isolated environment. Use the
    run detail and worker status or logs to identify the stalled test run.
@@ -120,4 +140,14 @@ pg_restore --dbname='service=release_restore' --exit-on-error --single-transacti
 
 Start an isolated API with the restored database and the matching project
 configuration. Verify the same run result, approval actor and digest, rollout
-outcome, and stable digest. Keep the dump in approved storage.
+outcome, and stable digest. Compare the account audit history in both databases
+using `python -m service.accounts history`. Keep the dump and audit output in
+approved storage.
+
+### Record the second operator's rehearsal
+
+Have the second operator use this guide to onboard a project and complete the
+interruption and isolated restore. Record the operator, date, environment,
+run and approval IDs, alert and recovery times, audit comparison result, and
+steps that needed clarification. Keep reviewer keys and document contents out
+of the rehearsal record.

@@ -128,6 +128,8 @@ Install `service/requirements.txt` to run the [service tests and offline Investi
 
 See the [restricted pilot runbook](docs/PILOT.md) for the clean-checkout Compose rehearsal, hosted configuration, destination allowlist, provenance verification, and recovery drills.
 
+The pilot rehearsal verifies that the independent queue health probe detects a stalled evaluation and clears after worker recovery. [Monitor the queue and rehearse recovery](docs/PILOT.md#rehearse-recovery-and-restore)
+
 | Guide | Contents |
 |---|---|
 | [Operations](docs/OPERATIONS.md) | Run individual processes, connect real build endpoints, configure GitHub Checks, run Temporal and the canary drill |
