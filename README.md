@@ -2,6 +2,10 @@
 
 **Catch AI regressions before they reach users.** ReleaseTrace asks the current and proposed versions of an AI application the same questions, blocks releases that fail critical checks, and shows reviewers the evidence behind the decision.
 
+![Python 3.12](https://img.shields.io/badge/Python-3.12-336B9F?style=flat-square&labelColor=242A32&logo=python&logoColor=FFD343) ![FastAPI 0.163.2](https://img.shields.io/badge/FastAPI-0.163.2-087F75?style=flat-square&labelColor=242A32&logo=fastapi&logoColor=38D9BF) ![LangGraph 1.2.22](https://img.shields.io/badge/LangGraph-1.2.22-66539C?style=flat-square&labelColor=242A32&logo=langgraph&logoColor=C4AAFF) ![PostgreSQL 16](https://img.shields.io/badge/PostgreSQL-16-3D6689?style=flat-square&labelColor=242A32&logo=postgresql&logoColor=83BFFE)  
+![Next.js 16.4.6](https://img.shields.io/badge/Next.js-16.4.6-526078?style=flat-square&labelColor=242A32&logo=nextdotjs&logoColor=D5D9FF) ![React 19.3.1](https://img.shields.io/badge/React-19.3.1-246B83?style=flat-square&labelColor=242A32&logo=react&logoColor=61DAFB) ![TypeScript 5.9.3](https://img.shields.io/badge/TypeScript-5.9.3-2F6FB2?style=flat-square&labelColor=242A32&logo=typescript&logoColor=82BFFF)  
+![Temporal SDK](https://img.shields.io/badge/Temporal-SDK-525D87?style=flat-square&labelColor=242A32&logo=temporal&logoColor=B8B6FF) ![GitHub Actions CI](https://img.shields.io/badge/GitHub%20Actions-CI-345B91?style=flat-square&labelColor=242A32&logo=githubactions&logoColor=8CB9FF) ![Docker Compose Local demo](https://img.shields.io/badge/Docker%20Compose-Local%20demo-255C97?style=flat-square&labelColor=242A32&logo=docker&logoColor=80BFFF) ![Kubernetes Canary](https://img.shields.io/badge/Kubernetes-Canary-375FAE?style=flat-square&labelColor=242A32&logo=kubernetes&logoColor=91B5FF) ![Argo Rollouts 1.8.3](https://img.shields.io/badge/Argo%20Rollouts-1.8.3-9A5142?style=flat-square&labelColor=242A32&logo=argo&logoColor=FCA98A)
+
 [Open the public demo](https://releasetrace-demo.vercel.app/) · [Run locally](#run-the-local-demo) · [Review the results](#verification-and-rollout-evidence) · [System architecture](docs/ARCHITECTURE.md) · [File and folder diagrams](docs/CODE_MAP.md)
 
 ## Two-minute public walkthrough
@@ -124,10 +128,12 @@ I built ReleaseTrace end to end, including the evaluation rules, reviewer experi
 
 | Area | Built with | What to look for |
 | --- | --- | --- |
-| **Product and interface** | Next.js, React, TypeScript | Searchable release history, role-scoped project navigation, and side-by-side evidence. [Dashboard](dashboard/app) |
-| **Backend and reliability** | FastAPI, PostgreSQL, Alembic, Temporal | Signed and deduplicated webhooks, durable evaluation results, and worker replacement after a committed run. [API](service/api.py) · [Recovery test](service/test_temporal_worker.py) |
-| **AI evaluation** | Deterministic gate, LangGraph, SQLite FTS5 | Critical-case rules, citation validation, bounded investigation, and an offline retrieval benchmark. [Evaluator](service/evaluate_builds.py) · [Runbook RAG](runbook_rag) |
-| **Delivery and access** | GitHub Apps, Docker, OCI digests, Argo Rollouts | Check publication, audited project roles, and an approval attached to the exact evaluated image. [Architecture](docs/ARCHITECTURE.md) · [CI workflow](.github/workflows/ci.yml) |
+| **Frontend** | Next.js 16.4.6, React 19.3.1, TypeScript 5.9.3 | Searchable release history, project-scoped navigation, and side-by-side evidence. [Dashboard](dashboard/app) · [Dependencies](dashboard/package.json) |
+| **Backend and data** | Python 3.12, FastAPI 0.163.2, PostgreSQL 16, SQLAlchemy 2.1.9, Alembic 1.20.1, Temporal SDK `>=1.10,<2` | Signed webhook intake, duplicate-delivery handling, database migrations, durable evaluation jobs, and worker recovery after a committed run. [API](service/api.py) · [Dependency lockfile](service/requirements.compose.lock) · [Recovery test](service/test_temporal_worker.py) |
+| **AI evaluation and RAG** | LangGraph 1.2.22, SQLite FTS5, BM25, character trigram matching, optional OpenAI integration | Compare stable and candidate builds on the same cases, validate citations, block critical regressions, and run bounded investigations. The companion app uses hybrid retrieval and abstains when evidence is missing. [Evaluator](service/evaluate_builds.py) · [Investigation](service/investigation_graph.py) · [Retrieval benchmark](docs/PILOT.md#evaluate-runbook-rag) |
+| **Security and access** | GitHub Apps and Checks, PyJWT 2.15.1 | Verify webhook signatures, scope reviewer roles and sessions to projects, audit access, and bind approvals to the evaluated OCI image digest. [Security and access](docs/SECURITY.md) · [GitHub Check](service/github_check.py) |
+| **CI/CD and deployment** | GitHub Actions, Docker, Docker Compose, Kubernetes, kind 0.27.0, Argo Rollouts 1.8.3, Vercel | Run containerized demos, verify signed provenance, and rehearse canary promotion and rollback. Vercel hosts the public walkthrough. [Compose configuration](compose.yaml) · [Rollout workflow](.github/workflows/staging.yml) · [Public demo](https://releasetrace-demo.vercel.app/) |
+| **Testing and reliability** | Python `unittest`, Playwright 1.61.0, PostgreSQL `pg_dump` and `pg_restore` | Exercise API and worker behavior, browser flows, stalled-worker detection, and restoration of evidence and approval records. [CI workflow](.github/workflows/ci.yml) · [Verification evidence](#verification-and-rollout-evidence) |
 
 ### Trace a release in the source
 
